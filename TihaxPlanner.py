@@ -425,14 +425,20 @@ class MissionPlannerApp(ctk.CTk):
             print("Drone armed.")
             self.vehicle.armed = True
 
-    def takeoff_drone(self):
+    def takeoff_drone(self,otonom,altitude):
         if self.vehicle is not None:
-            self.dialog = ctk.CTkInputDialog(text="Kalkış yapılacak yüksekliği girin:", title="Kalkış")
-            self.text = self.dialog.get_input()  # waits for input
-            print("Drone taking off...")
-            self.vehicle.mode="GUIDED"
-            self.vehicle.armed=True
-            self.vehicle.simple_takeoff(float(self.text))
+            if otonom==0:
+                self.dialog = ctk.CTkInputDialog(text="Kalkış yapılacak yüksekliği girin:", title="Kalkış")
+                self.text = self.dialog.get_input()  # waits for input
+                print("Drone taking off...")
+                self.vehicle.mode="GUIDED"
+                self.vehicle.armed=True
+                self.vehicle.simple_takeoff(float(self.text))
+            else:             
+                print("Drone taking off...")
+                self.vehicle.mode="GUIDED"
+                self.vehicle.armed=True
+                self.vehicle.simple_takeoff(float(altitude))
 
     def land_drone(self):
         print("Drone landing...")
@@ -549,7 +555,7 @@ class MissionPlannerApp(ctk.CTk):
             print(f"Mevcut yükseklik: {current_altitude} m")
         
             # Hedef yüksekliği 10 metre artır
-            target_altitude = 40
+            target_altitude = 10
             print(f"Hedef yükseklik: {target_altitude} m")
 
             # Yeni hedef konumu
@@ -612,7 +618,7 @@ class MissionPlannerApp(ctk.CTk):
         if current_altitude <=0.8:
             print("cihaz inmiş rtl ye gerek yok")
             return
-        if current_altitude >= 39:  # Hedefe yaklaşınca
+        if current_altitude >= 9:  # Hedefe yaklaşınca
             if self.vehicle.mode != "RTL":
                 print("Hedef yüksekliğe ulaşıldı, RTL'ye geçiliyor...")
                 self.vehicle.mode = "RTL"
@@ -863,15 +869,55 @@ class ConnectionWindow(ctk.CTkToplevel):
         
         self.master.start_connection_thread(connection_type, address, baudrate)
         self.destroy()
-    
 
-if __name__ == "__main__":
+from flask import Flask, request, jsonify
+import time
+
+flaskapp = Flask(__name__)
+
+@flaskapp.route('/execute', methods=['POST'])
+def execute_command():
+    data = request.get_json()
+
+    # Komutları sırasıyla işle
+    
+    func_name = data.get("function")
+    args = data.get("args", [])
+
+    # Fonksiyon ismi ve parametreleri alıp çağırma
+    if func_name == "takeoff":
+        app.takeoff_drone(1,*args)
+        print(*args)
+    elif func_name == "wait":
+        #wait(*args)
+        time.sleep(*args)
+    elif func_name == "RTL":
+        app.RTL(0)
+    else:
+        print(f"[FAKE SERVER] Bilinmeyen komut: {func_name}")
+        return jsonify({"status": "error", "message": f"Bilinmeyen komut: {func_name}"}), 400
+
+    print(f"📥 Komut alındı: {func_name}({', '.join(map(str, args))})")
+
+    # Komutu simüle et (örneğin 2 saniye bekleyelim)
+    #time.sleep(2)
+
+    print(f"✅ Komut tamamlandı: {func_name}")
+    return jsonify({"status": "done"})
+
+def dedicated_server():
+    flaskapp.run(host="0.0.0.0", port=5000)
+
+if __name__ == '__main__':
     connection_string = "tcp:127.0.0.1:5762"  # Replace with actual connection
     #connection_string = "COM6"  # Windows için
     #baud_rate = 57600
     #vehicle = connect(connection_string ,wait_ready=True)
     vehicle=None
+    global app
     app = MissionPlannerApp()
+    threading.Thread(target=dedicated_server, args=()).start()
     #app.geometry(f"{app.winfo_screenwidth()}x{app.winfo_screenheight()-70}+0+0")
     #app.state("zoomed")
+
     app.mainloop()
