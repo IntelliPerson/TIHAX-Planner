@@ -306,8 +306,8 @@ class MissionPlannerApp(ctk.CTk):
         self.yaw_label = ctk.CTkLabel(self.telemetry_frame, text="HDOP: ", text_color="white")
         self.yaw_label.pack(pady=2,padx=2)
 
-        self.battery_panel = ctk.CTkLabel(self.telemetry_frame, text="Batarya Verisi")
-        self.battery_panel.pack(pady=5)     
+        self.flight_mode = ctk.CTkLabel(self.telemetry_frame, text="Uçuş Modu: ")
+        self.flight_mode.pack(pady=5)     
 
         self.battery_status = ctk.CTkLabel(self.telemetry_frame, text="Batarya Yüzdesi: %0", text_color="white")
         self.battery_status.pack(pady=2,padx=2)
@@ -344,7 +344,7 @@ class MissionPlannerApp(ctk.CTk):
         self.tabview.add("Mod")  # add tab at the end
         self.tabview.add("Acil")  # add tab at the end
         self.tabview.set("Mod")  # set currently visible tab
-        self.optionmenu = ctk.CTkOptionMenu(self.tabview.tab("Mod"), values=["Land", "Stabilize","Loiter","Flip","Smart_RTL","RTL","Auto","ALTHold","Guided"],
+        self.optionmenu = ctk.CTkOptionMenu(self.tabview.tab("Mod"), values=["Land", "Stabilize","Loiter","Flip","Smart_RTL","RTL","Auto","Alt_hold","Guided"],
                                         command=self.changeMode)
         self.optionmenu.pack(padx=20, pady=20)
 
@@ -874,12 +874,16 @@ class MissionPlannerApp(ctk.CTk):
             # Update horizon line
             self.canvas.coords(self.horizon_line, x2, y1, x1, y2)
 
+            flightmode = str(self.vehicle.mode).lower()
+            mod = flightmode.split(":")[1]
+
             # Update labels
             self.altitude_label.configure(text=f"Yükseklik: {altitude:.2f} m")
             self.pitch_label.configure(text=f"Ön Eğim: {pitch:.2f}°")
             self.roll_label.configure(text=f"Bağlı Uydu: {int(sats)}")
             self.yaw_label.configure(text=f"HDOP: {float(hdop/100)}")
             self.speed_label.configure(text = f"Hız: {total_speed:.2f} m/s")
+            self.flight_mode.configure(text=f"Uçuş Modu: {mod}")
             self.update_drone_position()
 
             self.battery_status.configure(text=f"Batarya Yüzdesi: %{batpercent}")
