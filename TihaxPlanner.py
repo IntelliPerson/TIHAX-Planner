@@ -6,7 +6,9 @@ global vehicle
 from CTkListbox import *
 from geopy.distance import geodesic
 from tkinter import PhotoImage
+import csv
 from tkinter import Canvas
+import datetime
 from device_manager import *
 import math
 from dronekit import Vehicle,LocationGlobalRelative,connect,LocationGlobal,VehicleMode,Command
@@ -17,11 +19,19 @@ from pymavlink import mavutil
 vehicle_manager = VehicleManager()
 
 global maplock
+global last_pwm
 maplock=True
+last_pwm = [0, 0, 0, 0]
 
+def pwm_listener(self, name, message):
+    global last_pwm
+    last_pwm[0] = message.servo1_raw
+    last_pwm[1] = message.servo2_raw
+    last_pwm[2] = message.servo3_raw
+    last_pwm[3] = message.servo4_raw
 
 class WaypointPlannerApp(ctk.CTkToplevel):
-    waypointnum=0
+    waypointnum=0 
     waypoint_dict={}
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -319,6 +329,10 @@ class MissionPlannerApp(ctk.CTk):
         self.map_widget.add_right_click_menu_command(label="Otomatik PID İşlemi",
                                         command=self.autotune,
                                         pass_coords=False)
+        
+        self.map_widget.add_right_click_menu_command(label="Eğitim Uçuşu", 
+                                                    command=self.train_flight,
+                                                    pass_coords=True)
 
         self.map_widget.add_right_click_menu_command(label="Başlangıç ayarla",command=self.set_home,pass_coords=True) 
 
@@ -331,7 +345,7 @@ class MissionPlannerApp(ctk.CTk):
         self.tabview.add("Acil")  # add tab at the end
         self.tabview.set("Mod")  # set currently visible tab
         self.optionmenu = ctk.CTkOptionMenu(self.tabview.tab("Mod"), values=["Land", "Stabilize","Loiter","Flip","Smart_RTL","RTL","Auto","ALTHold","Guided"],
-                                         command=self.changeMode)
+                                        command=self.changeMode)
         self.optionmenu.pack(padx=20, pady=20)
 
         self.switch_var = ctk.StringVar(value="off")
@@ -420,6 +434,65 @@ class MissionPlannerApp(ctk.CTk):
             else:
                 CTkMessagebox(title="Uyarı!", message="Drone geri dönüş modunda şuan yeni başlangıç ayarlayamazsınız.",icon="warning")
 
+    def data_logger(self):
+        self.vehicle.add_message_listener('SERVO_OUTPUT_RAW', pwm_listener)
+        fields = ["Time", "Roll", "Pitch", "Altitude", "Motor1", "Motor2", "Motor3", "Motor4"]
+        with open("hover_data.csv", mode='w', newline='') as file:
+            writer = csv.writer(file)
+            writer.writerow(fields)
+            print("🟢 Veri toplama başladı. 'ESC' tuşuna basarak durdurabilirsin.")
+            for i in range(120):
+                att = self.vehicle.attitude
+                alt = self.vehicle.location.global_relative_frame.alt
+                row = [
+                    time.time(),
+                    att.roll,
+                    att.pitch,
+                    alt,
+                    #1humidity,
+                    last_pwm[0],
+                    last_pwm[1],
+                    last_pwm[2],
+                    last_pwm[3],
+                ]
+
+                writer.writerow(row)
+                print("kayıt")
+                time.sleep(0.5)  # 2 Hz kayıt 31
+
+        print(f"\n🛑 Veri toplama durduruldu. Kayıt dosyası: hover_log.csv")
+        self.land_drone()
+
+
+
+
+    def checktakeoff(self):
+        current_location = self.vehicle.location.global_relative_frame
+        current_altitude = current_location.alt
+        #current_location = self.vehicle.location.global_relative_frame
+        #current_altitude = current_location.alt
+        print("alt check")
+        if self.vehicle.location.global_relative_frame.alt >= 9:  
+            if self.vehicle.mode != "POSHOLD":
+                print("hedef yükseklik tamam")
+                self.vehicle.mode="BRAKE"
+            self.data_logger()
+        else:
+            self.after(1000, self.checktakeoff) 
+
+    def train_flight(self,coords):
+        if self.vehicle is not None:
+            current_location = self.vehicle.location.global_relative_frame
+            current_altitude = current_location.alt
+            if current_altitude>2:
+                target_location = LocationGlobalRelative(current_location.lat, current_location.lon, 10)
+                self.vehicle.simple_goto(target_location)
+                self.checktakeoff()
+            else:
+                self.takeoff_drone(otonom=1,altitude=10)
+                self.checktakeoff()
+
+
     def arm_drone(self):
         if self.vehicle is not None:
             print("Drone armed.")
@@ -445,7 +518,7 @@ class MissionPlannerApp(ctk.CTk):
         # vehicle.mode=VehicleMode("LAND")
         self.changeMode("Land")
         self.update_drone_position()
-        self.update_compass_heading(0)
+        #self.update_compass_heading(0)
         self.update_horizon(0.5)
     
     def update_drone_position(self):
@@ -463,9 +536,7 @@ class MissionPlannerApp(ctk.CTk):
                 self.path_1.set_position_list(position_list)
             
 
-    def update_compass_heading(self, heading):
-        self.drone_heading = heading
-        self.compass_label.configure(text=f"Compass: {heading}°")
+
     
     def changeMode(self,choice):
         if self.vehicle is not None:
