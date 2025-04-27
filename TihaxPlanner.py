@@ -20,6 +20,7 @@ vehicle_manager = VehicleManager()
 
 global maplock
 global last_pwm
+global waypointcoords
 maplock=True
 last_pwm = [0, 0, 0, 0]
 
@@ -137,6 +138,8 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         self.listbox.delete(0, "end")
         self.waypoint_dict = {}
     def waypointadder(self,coords):
+        self.waypointcoords = self.waypointcoords
+        self.waypointcoords = coords
         print("Added Waypoint to",coords[0],coords[1])
         global waypointnum
         self.waypointnum = self.waypointnum 
@@ -161,6 +164,7 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         print("Waypoint'ler başarıyla silindi.")
         self.waypointnum = 0
         self.waypoints = []
+        self.waypointcoords = []
         self.waypoint_dict = {}
         self.listbox.delete(0, "end")
         self.map_widget.delete_all_path()
@@ -364,10 +368,13 @@ class MissionPlannerApp(ctk.CTk):
         self.RTL_button = ctk.CTkButton(self.control_frame, text="Geri Dön", command=lambda: self.RTL(0))
         self.RTL_button.grid(row=0, column=0, padx=10, pady=10)
 
+        self.test_button = ctk.CTkButton(self.control_frame, text="Test", command=lambda: self.mapping(20))
+        self.test_button.grid(row=0, column=0, padx=10, pady=10)
+
         self.connect_button = ctk.CTkButton(self.tabview.tab("Mod"), text="Drone'a Bağlan", command=self.open_connection_window)
         self.connect_button.pack(padx=10, pady=5)
 
-        self.takeoff_button = ctk.CTkButton(self.control_frame, text="Kalkış Yap", command=self.takeoff_drone)
+        self.takeoff_button = ctk.CTkButton(self.control_frame, text="Kalkış Yap", command=lambda:self.takeoff_drone(0,0))
         self.takeoff_button.grid(row=0, column=1, padx=10, pady=10)
 
         self.status_label = ctk.CTkLabel(self.control_frame, text="Bağlantı Yok")
@@ -389,6 +396,16 @@ class MissionPlannerApp(ctk.CTk):
         self.drone_lon = 30.3914130
         self.drone_heading = 0
         self.update_display()
+
+    def mapping(self, radius):
+
+        center_lat, center_lon = get_current_location(self.vehicle)
+        clear_all_waypoints(self.vehicle)
+
+        radius_cm = float(radius) * 100
+        waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
+
+        upload_mission(self.vehicle, waypoints)
 
     def waypoint_menu(self):
         # CTkMessagebox(title="Information", message="Daha yapmadım")
@@ -968,6 +985,26 @@ def execute_command():
         time.sleep(*args)
     elif func_name == "RTL":
         app.RTL(0)
+    elif func_name == "forward":
+        print("a")
+    elif func_name == "back":
+        print("a")
+    elif func_name == "right":
+        print("a")
+    elif func_name == "left":
+        print("a")
+    elif func_name == "backtolastwp":   
+        print("a")
+    elif func_name == "gotoaddress":
+        app.flight_to(*args)
+    elif func_name == "follow":
+        app.changeMode("Follow")
+    elif func_name == "lidarmapping":
+        print("a")
+    elif func_name == "mapping":
+        app.mapping(*args)
+    elif func_name == "land":
+        app.land_drone()
     else:
         print(f"[FAKE SERVER] Bilinmeyen komut: {func_name}")
         return jsonify({"status": "error", "message": f"Bilinmeyen komut: {func_name}"}), 400
@@ -982,6 +1019,80 @@ def execute_command():
 
 def dedicated_server():
     flaskapp.run(host="0.0.0.0", port=5000)
+
+def clear_all_waypoints(vehicle):
+    print("Tüm waypoint'ler temizleniyor...")
+    cmds = vehicle.commands
+    cmds.clear()
+    cmds.upload()
+    print("Waypoint'ler başarıyla silindi.")
+
+def get_current_location(vehicle):
+    location = vehicle.location.global_relative_frame
+    print(f"Drone'un mevcut konumu: Enlem={location.lat}, Boylam={location.lon}")
+    return location.lat, location.lon
+
+def calculatespacing(radius):
+    spacing = radius / 5
+    if radius <= 40:
+        spacing = radius / 3
+    return spacing
+
+from geographiclib.geodesic import Geodesic
+import math
+
+def calculate_waypoints(center_lat, center_lon, radius_cm, spacing_m=10):
+    geod = Geodesic.WGS84
+    radius_m = radius_cm / 100
+    spacing_m = calculatespacing(radius_m)
+
+    waypoints = []
+    side_length = radius_m * 2
+    num_lines = int(side_length / spacing_m)
+
+    for i in range(num_lines + 1):
+        offset_y = (i - num_lines / 2) * spacing_m
+        north_shift = geod.Direct(center_lat, center_lon, 0 if offset_y >= 0 else 180, abs(offset_y))
+        line_lat = north_shift['lat2']
+        line_lon = north_shift['lon2']
+
+        # Sağdan sola mı, soldan sağa mı?
+        reverse = i % 2 == 1
+
+        line_wps = []
+        num_points_in_line = int(side_length / spacing_m)
+
+        for j in range(num_points_in_line + 1):
+            offset_x = (j - num_points_in_line / 2) * spacing_m
+            bearing = 90 if offset_x >= 0 else 270
+            point = geod.Direct(line_lat, line_lon, bearing, abs(offset_x))
+            lat, lon = point['lat2'], point['lon2']
+
+            # Dairenin dışına taşmasın
+            dist = geod.Inverse(center_lat, center_lon, lat, lon)['s12']
+            if dist <= radius_m:
+                line_wps.append((lat, lon))
+
+        # Dönüş yönüne göre sırala
+        if reverse:
+            line_wps.reverse()
+
+        waypoints.extend(line_wps)
+
+    return waypoints
+
+
+def upload_mission(vehicle, waypoints):
+    cmds = vehicle.commands
+    cmds.clear()
+    print("Waypoint'ler yükleniyor...")
+    for (lat, lon) in waypoints:
+        cmd = Command(0, 0, 0, mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                      mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0, 0, 0, 0, 0, 0,
+                      lat, lon, 10)
+        cmds.add(cmd)
+    cmds.upload()
+    print("Waypoint'ler başarıyla yüklendi!")
 
 if __name__ == '__main__':
     connection_string = "tcp:127.0.0.1:5762"  # Replace with actual connection
