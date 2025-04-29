@@ -13,37 +13,51 @@ class VehicleManager:
         return cls._instance
 
     def __init__(self):
-        self.vehicle = None
-        self._vehicle_lock = threading.Lock()
+        self.vehicles = {}  # id -> vehicle
+        self._vehicles_lock = threading.Lock()
 
-    def import_device(self, vehicle):
-        with self._vehicle_lock:
-            if self.vehicle is None:
-               self.vehicle=vehicle
-
-    def connectvalid(self):
-        with self._vehicle_lock:
-            if self.vehicle is None:
-               return 0
+    def connect_vehicle(self, connection_string: str, ID: str):
+        with self._vehicles_lock:
+            if ID not in self.vehicles:
+                print(f"[{ID}] Bağlantı kuruluyor...")
+                vehicle = connect(connection_string, wait_ready=True)
+                self.vehicles[ID] = vehicle
+                print(f"[{ID}] Bağlantı tamamlandı!")
             else:
-                return 1
+                print(f"[{ID}] Zaten bağlı.")
 
-    def connect_vehicle(self, connection_string):
-        with self._vehicle_lock:
-            if self.vehicle is None:
-                print("Bağlantı kuruluyor...")
-                self.vehicle = connect(connection_string, wait_ready=True)
-                print("Bağlantı tamamlandı!")
+    def get_vehicle(self, ID: str) -> Vehicle:
+        with self._vehicles_lock:
+            return self.vehicles.get(ID, None)
+
+    def disconnect_vehicle(self, ID: str):
+        with self._vehicles_lock:
+            vehicle = self.vehicles.get(ID)
+            if vehicle:
+                vehicle.close()
+                del self.vehicles[ID]
+                print(f"[{ID}] Bağlantı kesildi.")
             else:
-                print("zaten bağlı")
+                print(f"[{ID}] Zaten bağlantı yok.")
 
-    def get_vehicle(self):
-        with self._vehicle_lock:
-            return self.vehicle
+    def import_device(self, vehicle, ID: str):
+        with self._vehicles_lock:
+               self.vehicles[ID] = vehicle
 
-    def disconnect_vehicle(self):
-        with self._vehicle_lock:
-            if self.vehicle:
-                #self.vehicle.close()
-                self.vehicle = None
-                print("Bağlantı kesildi.")
+    def list_connected_vehicles(self):
+        with self._vehicles_lock:
+            return list(self.vehicles.keys())
+
+    def is_connected(self, ID: str) -> bool:
+        with self._vehicles_lock:
+            return ID in self.vehicles
+
+    def get_connectiontype(self) -> str:
+        with self._vehicles_lock:
+            count = len(self.vehicles)
+            if count == 2:
+                return "dual"
+            elif count == 1:
+                return "single"
+            else:
+                return "none"

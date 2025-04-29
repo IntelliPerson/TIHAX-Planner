@@ -58,6 +58,9 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         self.get_button.grid(row=0,column=1,padx=10,pady=10)
         self.clear_button = ctk.CTkButton(self.control_frame, text="Waypointleri Sil", command=self.clear_wp)
         self.clear_button.grid(row=0,column=2,padx=10,pady=10)
+
+        self.mapping_button = ctk.CTkButton(self.control_frame, text="Haritalama Yap", command=lambda: app.mapping(otonom=0,radius=0))
+        self.mapping_button.grid(row=0,column=2,padx=10,pady=10)
         self.telemetry_frame = ctk.CTkFrame(self, width=300)
         self.telemetry_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ns")
         self.drone_marker = self.map_widget.set_marker(40.7769240, 30.3914130, text="Drone",text_color="white",icon=self.drone_image)
@@ -253,12 +256,12 @@ class MissionPlannerApp(ctk.CTk):
         
         # Harita bileşeni
         self.drone_image = PhotoImage(file="hexa.png")
-        self.map_widget = TkinterMapView(self.map_frame, width=400, height=400)
+        self.map_widget = TkinterMapView(self.map_frame, width=400, height=400,use_database_only=False,database_path="./offline_tiles.db")
         self.map_widget.pack(expand=True, fill="both")
         self.map_widget.set_position(40.7769240, 30.3914130)  # Varsayılan konum (San Francisco)
         self.drone_marker = self.map_widget.set_marker(40.7769240, 30.3914130, text="Drone", text_color = "white", icon=self.drone_image)
         self.drone_marker.hide_image(False)
-        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
+        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga")
 
         self.waypoint_window = None
         try:
@@ -339,6 +342,10 @@ class MissionPlannerApp(ctk.CTk):
                                                     pass_coords=True)
 
         self.map_widget.add_right_click_menu_command(label="Başlangıç ayarla",command=self.set_home,pass_coords=True) 
+        
+        self.map_widget.add_right_click_menu_command(label="Erzak Taşı",command=self.kargohile,pass_coords=True) 
+
+
 
 
 
@@ -357,7 +364,7 @@ class MissionPlannerApp(ctk.CTk):
         self.emergency_button.pack(padx=10, pady=10)
         self.emergencybrake_button = ctk.CTkButton(self.tabview.tab("Acil"), text="Acil Fren", command=self.emergency_Brake)
         self.emergencybrake_button.pack(padx=10, pady=10)
-
+        self.opened=0
 
         # Kontrol butonları
         self.control_frame = ctk.CTkFrame(self, height=300)
@@ -367,9 +374,6 @@ class MissionPlannerApp(ctk.CTk):
         self.arm_button.grid(row=0, column=0, padx=10, pady=10)
         self.RTL_button = ctk.CTkButton(self.control_frame, text="Geri Dön", command=lambda: self.RTL(0))
         self.RTL_button.grid(row=0, column=0, padx=10, pady=10)
-
-        self.test_button = ctk.CTkButton(self.control_frame, text="Test", command=lambda: self.mapping(20))
-        self.test_button.grid(row=0, column=0, padx=10, pady=10)
 
         self.connect_button = ctk.CTkButton(self.tabview.tab("Mod"), text="Drone'a Bağlan", command=self.open_connection_window)
         self.connect_button.pack(padx=10, pady=5)
@@ -397,15 +401,85 @@ class MissionPlannerApp(ctk.CTk):
         self.drone_heading = 0
         self.update_display()
 
-    def mapping(self, radius):
+    def kargohile(self,coords):
+        self.kargo(otonom=0,altitude=0,coords=coords)
 
-        center_lat, center_lon = get_current_location(self.vehicle)
-        clear_all_waypoints(self.vehicle)
+    def checktakeof(self,alt,coords):
+        current_location = self.vehicle.location.global_relative_frame
+        current_altitude = current_location.alt
+        alti=float(alt)
+        if current_altitude >= alti:  
+            print("hedef yükseklik tamam")
+            self.flight_to(coords=coords)
+            self.location_check(coords)
+        else:
+            self.after(1000, lambda:self.checktakeof(alt=alt,coords=coords)) 
 
-        radius_cm = float(radius) * 100
-        waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
+    def kargo(self,otonom,altitude,coords):
+        if otonom==1:
+            if self.vehicle.location.global_relative_frame.alt>=1:
+                lat = float(coords[0])
+                lon = float(coords[1])
+                self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
+            else:
+                
+                print("Drone taking off...")
+                self.vehicle.mode="GUIDED"
+                self.vehicle.armed=True
+                self.vehicle.simple_takeoff(float(altitude))
+                self.checktakeof(alt=altitude,coords=coords)
+        else:
+            if self.vehicle.location.global_relative_frame.alt>=1:
+                lat = float(coords[0])
+                lon = float(coords[1])
+                self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
+            else:
+                self.dialog = ctk.CTkInputDialog(text="K)alkış yapılacak yüksekliği girin:", title="Kalkış")
+                self.text = self.dialog.get_input()  # waits for input
+                print("Drone taking off...")
+                self.vehicle.mode="GUIDED"
+                self.vehicle.armed=True
+                self.vehicle.simple_takeoff(float(self.text))
+                self.checktakeof(alt=self.text,coords=coords)
+                
+            
+    def mapping(self, radius, otonom):
+        if otonom==1:
+
+            center_lat, center_lon = get_current_location(self.vehicle)
+            clear_all_waypoints(self.vehicle)
+
+            radius_cm = float(radius) * 100
+            waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
+        else:    
+            self.dialog = ctk.CTkInputDialog(text="Haritalamak istediğiniz yer miktarını giriniz:", title="Haritalama")
+            self.text = self.dialog.get_input()  # waits for input
+            center_lat, center_lon = get_current_location(self.vehicle)
+            clear_all_waypoints(self.vehicle)
+
+            radius_cm = float(self.text) * 100
+            waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
 
         upload_mission(self.vehicle, waypoints)
+
+    def location_check(self,coords):
+            self.drone_lat = self.vehicle.location.global_frame.lat 
+            self.drone_lon = self.vehicle.location.global_frame.lon 
+            current_location = self.vehicle.location.global_relative_frame
+             
+            distance = self.get_distance_metres(current_location,self.target_location)
+            print(distance)
+            if distance<3:
+                print("oe")
+                self.drone_lat = self.vehicle.location.global_frame.lat 
+                self.drone_lon = self.vehicle.location.global_frame.lon 
+                self.target_location = LocationGlobalRelative(self.drone_lat, self.drone_lon, 2)
+                self.vehicle.simple_goto(self.target_location)
+                print("babaannnennn")
+                self.after(15000, lambda: self.RTL(0))
+                
+            else:
+                self.after(1000, lambda: self.location_check(coords=coords))
 
     def waypoint_menu(self):
         # CTkMessagebox(title="Information", message="Daha yapmadım")
@@ -674,6 +748,9 @@ class MissionPlannerApp(ctk.CTk):
         else:
             self.after(1000, self.checkaltitude) 
 
+
+
+
     def checkalt(self,disconnect):
         current_location = self.vehicle.location.global_relative_frame
         current_altitude = current_location.alt
@@ -711,6 +788,7 @@ class MissionPlannerApp(ctk.CTk):
                 print("Hedef yüksekliğe ulaşıldı, RTL'ye geçiliyor...")
                 self.vehicle.mode = "RTL"
                 self.RTL_Start=1
+                self.RTL_trig=0
                 if disconnect==1:
                     self.checkalt(disconnect)
         else:
@@ -719,13 +797,14 @@ class MissionPlannerApp(ctk.CTk):
 
 
     def open_connection_window(self):
-        self.valid = vehicle_manager.connectvalid()
-        if self.valid==0:
+        self.valid = 0
+        if self.valid==0 and self.opened==0:
+            self.opened=1
             ConnectionWindow(self)
             print("bağlantı")
         else:    
             print("kes")
-            if self.RTL_trig==0:
+            if self.RTL_trig==0 and self.vehicle is not None:
                 if self.hedefvar==1:
                     self.path_1.delete()
                     self.new_marker.delete()
@@ -744,20 +823,20 @@ class MissionPlannerApp(ctk.CTk):
                     vehicle_manager.vehicle=None
                     self.connect_button.configure(text="Drone'a Bağlan")
                     self.status_label.configure(text="Bağlantı Kesildi")
-            else:
+            elif self.vehicle is not None:
                 CTkMessagebox(title="Uyarı", message="Cihazınız Return To Launch modunda lütfen geri dönmesini bekleyin.", sound=1)
 
     
-    def start_connection_thread(self, connection_type, address, baudrate):
+    def start_connection_thread(self, connection_type, address, baudrate, ID):
         """ Bağlantıyı ayrı bir thread'de çalıştırır, UI'nin donmasını engeller. """
         #self.progress_bar.pack(pady=10)
         #self.progress_bar.start()
         self.status_label.configure(text="Bağlanıyor...")
 
-        connection_thread = threading.Thread(target=self.connect_drone, args=(connection_type, address, baudrate))
+        connection_thread = threading.Thread(target=self.connect_drone, args=(connection_type, address, baudrate,ID))
         connection_thread.start()
     
-    def connect_drone(self, connection_type, address, baudrate):
+    def connect_drone(self, connection_type, address, baudrate,ID):
         """ DroneKit bağlantısını başlatır ve ilerleme çubuğunu günceller. """
         from dronekit import connect as dk_connect, VehicleMode
         try:
@@ -772,7 +851,7 @@ class MissionPlannerApp(ctk.CTk):
             
             self.vehicle = vehicle
             self.status_label.configure(text="Bağlantı başarılı!")
-            vehicle_manager.import_device(vehicle=vehicle)
+            vehicle_manager.import_device(vehicle=vehicle,ID=str(ID))
             self.connect_button.configure(text="Bağlantıyı Kes")
             #self.home_location = self.vehicle.home_location
             #self.home_marker = self.map_widget.set_marker(self.home_location.lat, self.home_location.lon, text="Başlangıç")
@@ -780,6 +859,15 @@ class MissionPlannerApp(ctk.CTk):
             #self.vehicle = vehicle_manager.get_vehicle()
 
             #self.status_label.configure(text="Drone hazır!")
+            if len(vehicle_manager.list_connected_vehicles())==2:
+                self.tabview.add("Dual")
+                radio_var = tk.IntVar(value=0)
+                self.r1 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 1",
+                                             command=print("hello1"), variable= radio_var, value=1)
+                self.r1.pack(padx=10, pady=5)
+                self.r2 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 2",
+                                             command=print("hello2"), variable= radio_var, value=2)
+                self.r2.pack(padx=15, pady=5)
 
         except Exception as e:
             self.status_label.configure(text=f"Bağlantı Hatası: {e}")
@@ -876,13 +964,13 @@ class MissionPlannerApp(ctk.CTk):
             center_x = 300
             center_y = 150
             x1 = (center_x + math.cos(roll_radians) * line_length / 2) - 150
-            y1 = (center_y - math.sin(roll_radians) * line_length / 2 + offset_y) -70
+            y1 = (center_y - math.sin(roll_radians) * line_length / 2 - offset_y) -70
             x2 = (center_x - math.cos(roll_radians) * line_length / 2) - 150
-            y2 = (center_y + math.sin(roll_radians) * line_length / 2 + offset_y) -70
+            y2 = (center_y + math.sin(roll_radians) * line_length / 2 - offset_y) -70
 
             # Ensure y-values stay within canvas bounds
-            y1 = max(0, min(300, y1))
-            y2 = max(0, min(300, y2))
+            y1 = max(0, min(300, (y1)))
+            y2 = max(0, min(300, (y2)))
 
             # Update sky and ground positions
             #self.canvas.coords(self.sky_rectangle, 0, 0, y1, y2)
@@ -916,50 +1004,126 @@ class ConnectionWindow(ctk.CTkToplevel):
     def __init__(self, parent):
         super().__init__(parent)
         self.title("Bağlantı Seçimi")
-        self.geometry("400x250")
+        self.geometry("370x440")
+        self.resizable(False, False)
         self.lift()
         self.focus_force()
         
-        self.connection_type = ctk.StringVar(value="TCP")
-        self.address = ctk.StringVar()
-        self.baudrate = ctk.StringVar(value="57600")
+
+        self.connection_mode = ctk.StringVar(value="single")
+        self.connection_type1 = ctk.StringVar(value="TCP")
+        self.connection_type2 = ctk.StringVar(value="TCP")
+        self.address1 = ctk.StringVar()
+        self.address2 = ctk.StringVar()
+        self.baudrate1 = ctk.StringVar(value="57600")
+        self.baudrate2 = ctk.StringVar(value="57600")
+        self.drone_id1 = ctk.StringVar(value="drone1")
+        self.drone_id2 = ctk.StringVar(value="drone2")
+
+        # Bağlantı modu
+        ctk.CTkLabel(self, text="Bağlantı Modu:").pack(pady=5)
+        ctk.CTkOptionMenu(self, variable=self.connection_mode, values=["single", "dual"], command=self.update_mode).pack(pady=5)
+        self.baudrate_widgets = {}
+        # Ana çerçeve
+        self.main_frame = ctk.CTkFrame(self)
+        self.main_frame.pack(fill="both", expand=True, padx=20, pady=10)
+
+        # Tek ve çift bağlantı çerçeveleri
+        self.single_frame = ctk.CTkFrame(self.main_frame)
+        self.dual_frame = ctk.CTkFrame(self.main_frame)
+
+        # Drone ayarlarını oluştur
+        self.build_connection_fields(self.single_frame, 0, self.connection_type1, self.address1, self.baudrate1, self.drone_id1, "Drone 1")
         
-        ctk.CTkLabel(self, text="Bağlantı Türü:").pack(pady=5)
-        self.conn_type_menu = ctk.CTkOptionMenu(self, variable=self.connection_type, values=["TCP", "UDP", "Telemetri"], command=self.update_fields)
-        self.conn_type_menu.pack(pady=5)
-        
-        ctk.CTkLabel(self, text="Bağlantı Adresi:").pack(pady=5)
-        self.address_entry = ctk.CTkEntry(self, textvariable=self.address)
-        self.address_entry.pack(pady=5)
-        
-        self.baudrate_label = ctk.CTkLabel(self, text="İletişim Hızı:")
-        self.baudrate_entry = ctk.CTkEntry(self, textvariable=self.baudrate)
-        
-        self.update_fields("TCP")
-        
+        self.build_connection_fields(self.dual_frame, 0, self.connection_type1, self.address1, self.baudrate1, self.drone_id1, "Drone 1")
+        self.build_connection_fields(self.dual_frame, 1, self.connection_type2, self.address2, self.baudrate2, self.drone_id2, "Drone 2")
+
+        self.single_frame.pack(fill="x")
+
         ctk.CTkButton(self, text="Bağlan", command=self.connect).pack(pady=10)
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
     
-    def update_fields(self, selected_type):
-        if selected_type == "Telemetri":
-            self.address_entry.delete(0, "end")
-            self.address_entry.insert(0, "COM3")
-            self.baudrate_label.pack(pady=5)
-            self.baudrate_entry.pack(pady=5)
-        else:
-            self.address_entry.delete(0, "end")
-            if selected_type == "TCP":
-                self.address_entry.insert(0, "127.0.0.1:5762")
-            else:
-                self.address_entry.insert(0, "127.0.0.1:14550")
-            self.baudrate_label.pack_forget()
-            self.baudrate_entry.pack_forget()
-    
-    def connect(self):
-        connection_type = self.connection_type.get()
-        address = self.address.get()
-        baudrate = self.baudrate.get() if connection_type == "Telemetri" else None
+    def on_close(self):
+        app.opened=0
+        self.destroy()
+
+    def build_connection_fields(self, parent, column, conn_type_var, addr_var, baud_var, id_var, title):
+        frame = ctk.CTkFrame(parent)
         
-        self.master.start_connection_thread(connection_type, address, baudrate)
+        frame.grid(row=0, column=column, padx=10, pady=10, sticky="n")
+
+        ctk.CTkLabel(frame, text=title, font=("Arial", 14)).pack(pady=(5, 10))
+        
+        ctk.CTkLabel(frame, text="Bağlantı Türü:").pack()
+        menu = ctk.CTkOptionMenu(frame, variable=conn_type_var, values=["TCP", "UDP", "Telemetri"], command=lambda t, av=addr_var, bv=baud_var, f=frame: self.update_fields(t, av, bv, f))
+        menu.pack()
+
+        ctk.CTkLabel(frame, text="Bağlantı Adresi:").pack()
+        entry = ctk.CTkEntry(frame, textvariable=addr_var)
+        entry.pack()
+
+        ctk.CTkLabel(frame, text="Drone ID:").pack()
+        ctk.CTkEntry(frame, textvariable=id_var).pack()
+
+        baud_label = ctk.CTkLabel(frame, text="İletişim Hızı:")
+        baud_entry = ctk.CTkEntry(frame, textvariable=baud_var)
+
+        frame._baud_label = baud_label
+        frame._baud_entry = baud_entry
+        baud_label.pack()
+        baud_entry.pack()
+        self.baudrate_widgets[frame] = {"label": baud_label, "entry": baud_entry}
+
+        self.update_fields(conn_type_var.get(), addr_var, baud_var, frame)
+
+    def update_fields(self, selected_type, address_var, baudrate_var,frame):
+        if selected_type == "Telemetri":
+            address_var.set("COM3")
+            baudrate_var.set("57600")
+            self.baudrate_widgets[frame]["label"].configure(state="normal")
+            self.baudrate_widgets[frame]["entry"].configure(state="normal")
+        elif selected_type == "TCP":
+            address_var.set("127.0.0.1:5762")
+            baudrate_var.set("")
+            self.baudrate_widgets[frame]["label"].configure(state="disabled")
+            self.baudrate_widgets[frame]["entry"].configure(state="disabled")
+        else:
+            address_var.set("127.0.0.1:14550")
+            baudrate_var.set("")
+            self.baudrate_widgets[frame]["label"].configure(state="disabled")
+            self.baudrate_widgets[frame]["entry"].configure(state="disabled")
+
+    def update_mode(self, selected_mode):
+        for widget in self.main_frame.winfo_children():
+            widget.pack_forget()
+
+        if selected_mode == "single":
+            self.single_frame.pack(fill="x")
+        else:
+            self.dual_frame.pack(fill="x")
+
+    def connect(self):
+        mode = self.connection_mode.get()
+        if mode == "single":
+            self.master.start_connection_thread(
+                self.connection_type1.get(),
+                self.address1.get(),
+                self.baudrate1.get() if self.connection_type1.get() == "Telemetri" else None,
+                self.drone_id1.get()
+            )
+        else:
+            self.master.start_connection_thread(
+                self.connection_type1.get(),
+                self.address1.get(),
+                self.baudrate1.get() if self.connection_type1.get() == "Telemetri" else None,
+                self.drone_id1.get()
+            )
+            self.master.start_connection_thread(
+                self.connection_type2.get(),
+                self.address2.get(),
+                self.baudrate2.get() if self.connection_type2.get() == "Telemetri" else None,
+                self.drone_id2.get()
+            )
         self.destroy()
 
 from flask import Flask, request, jsonify
