@@ -42,6 +42,10 @@ class VehicleManager:
             else:
                 print(f"[{ID}] Zaten bağlantı yok.")
 
+    def disconnect_vehicles(self):
+        with self._vehicles_lock:
+            self.vehicles = {}
+
     def import_device(self, vehicle, ID: str):
         with self._vehicles_lock:
                self.vehicles[ID] = vehicle

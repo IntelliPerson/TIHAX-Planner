@@ -31,6 +31,136 @@ def pwm_listener(self, name, message):
     last_pwm[2] = message.servo3_raw
     last_pwm[3] = message.servo4_raw
 
+class SetupWindow(ctk.CTkToplevel):
+    def __init__(self, master=None):
+        super().__init__(master)
+        self.title("Kurulum")
+        self.geometry("800x600")
+        self.lift()
+        self.focus_force()
+        
+
+        # Sekmeli yapı (tabview)
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Sekmeler
+        self.frame_tab = self.tabview.add("📐 Frame Tipi")
+        self.calibration_tab = self.tabview.add("🎯 Kalibrasyonlar")
+        self.flight_mode_tab = self.tabview.add("🧭 Flight Mode")
+        self.pid_tab = self.tabview.add("📊 PID Tuning")
+        self.param_tab = self.tabview.add("⚙️ Parametre Editörü")
+
+        self.create_frame_tab()
+        self.create_calibration_tab()
+        self.create_flight_mode_tab()
+        self.create_pid_tab()
+        self.create_param_tab()
+        self.create_calibration_tab()
+
+    def create_calibration_tab(self):
+        # Ana çerçeve (sol menü + sağ içerik)
+        main_frame = ctk.CTkFrame(self.calibration_tab)
+        main_frame.pack(fill="both", expand=True, padx=20, pady=20)
+
+        # Sol menü
+        menu_frame = ctk.CTkFrame(main_frame, width=150)
+        menu_frame.pack(side="left", fill="y", padx=10)
+
+        # Sağ içerik (dinamik değişecek)
+        self.calibration_content = ctk.CTkFrame(main_frame)
+        self.calibration_content.pack(side="left", fill="both", expand=True, padx=10)
+
+        # Menü butonları
+
+
+        # Varsayılan olarak ivmeölçer gösterilsin
+        self.show_accel_calibration()
+
+    def clear_calibration_content(self):
+        for widget in self.calibration_content.winfo_children():
+            widget.destroy()
+
+    def show_accel_calibration(self):
+        self.clear_calibration_content()
+        ctk.CTkLabel(self.calibration_content, text="İvmeölçer Kalibrasyonu", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkLabel(self.calibration_content, text="Drone'u düz bir zemine koyun ve sabit tutun.").pack(pady=5)
+        ctk.CTkButton(self.calibration_content, text="Kalibrasyonu Başlat", command=lambda: None).pack(pady=10)
+
+    def show_gyro_calibration(self):
+        self.clear_calibration_content()
+        ctk.CTkLabel(self.calibration_content, text="Jiroskop Kalibrasyonu", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkLabel(self.calibration_content, text="Cihaz sabitken kalibrasyon yapılmalıdır.").pack(pady=5)
+        ctk.CTkButton(self.calibration_content, text="Kalibrasyonu Başlat", command=lambda: None).pack(pady=10)
+
+    def show_compass_calibration(self):
+        self.clear_calibration_content()
+        ctk.CTkLabel(self.calibration_content, text="Pusula Kalibrasyonu", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkLabel(self.calibration_content, text="Cihazı farklı yönlere döndürerek 360° çevirmelisiniz.").pack(pady=5)
+        ctk.CTkButton(self.calibration_content, text="Başlat", command=lambda: None).pack(pady=10)
+
+    def show_rc_calibration(self):
+        self.clear_calibration_content()
+        ctk.CTkLabel(self.calibration_content, text="RC Kalibrasyonu", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkLabel(self.calibration_content, text="Tüm kanalları maksimum/minimuma getirin.").pack(pady=5)
+        ctk.CTkButton(self.calibration_content, text="RC Kalibrasyonu Başlat", command=lambda: None).pack(pady=10)
+
+    def create_frame_tab(self):
+        ctk.CTkLabel(self.frame_tab, text="Drone Tipi Seçimi", font=("Arial", 16)).pack(pady=10)
+        self.frame_select = ctk.CTkOptionMenu(self.frame_tab, values=["Quad (X)", "Hexa", "Octo", "Y6", "Tri", "Plane"])
+        self.frame_select.pack(pady=10)
+        ctk.CTkButton(self.frame_tab, text="Frame Tipini Ayarla", command=lambda: None).pack(pady=5)
+
+    def create_calibration_tab(self):
+        ctk.CTkLabel(self.calibration_tab, text="Sensör Kalibrasyonları", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkButton(self.calibration_tab, text="İvmeölçer Kalibrasyonu", command=lambda: None).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="Jiroskop Kalibrasyonu", command=lambda: None).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="Pusula Kalibrasyonu", command=lambda: None).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="RC Kalibrasyonu", command=lambda: None).pack(pady=5)
+
+    def create_flight_mode_tab(self):
+        ctk.CTkLabel(self.flight_mode_tab, text="Uçuş Modları", font=("Arial", 16)).pack(pady=10)
+        modes = ["Stabilize", "AltHold", "Loiter", "Auto", "RTL", "Acro", "GUIDED"]
+        self.mode_menu = ctk.CTkOptionMenu(self.flight_mode_tab, values=modes)
+        self.mode_menu.pack(pady=10)
+        ctk.CTkButton(self.flight_mode_tab, text="Modu Ayarla", command=lambda: None).pack(pady=5)
+
+    def create_pid_tab(self):
+        ctk.CTkLabel(self.pid_tab, text="PID Ayarları", font=("Arial", 16)).pack(pady=10)
+
+        # Basit PID alanları (Roll örneği)
+        for axis in ["Roll", "Pitch", "Yaw"]:
+            frame = ctk.CTkFrame(self.pid_tab)
+            frame.pack(pady=5, padx=20, fill="x")
+
+            ctk.CTkLabel(frame, text=f"{axis} P:").grid(row=0, column=0, padx=5, pady=5)
+            ctk.CTkEntry(frame, placeholder_text="0.1").grid(row=0, column=1, padx=5)
+
+            ctk.CTkLabel(frame, text=f"{axis} I:").grid(row=0, column=2, padx=5)
+            ctk.CTkEntry(frame, placeholder_text="0.01").grid(row=0, column=3, padx=5)
+
+            ctk.CTkLabel(frame, text=f"{axis} D:").grid(row=0, column=4, padx=5)
+            ctk.CTkEntry(frame, placeholder_text="0.001").grid(row=0, column=5, padx=5)
+
+    def create_param_tab(self):
+        ctk.CTkLabel(self.param_tab, text="Parametre Editörü", font=("Arial", 16)).pack(pady=10)
+        search_frame = ctk.CTkFrame(self.param_tab)
+        search_frame.pack(pady=5)
+
+        ctk.CTkEntry(search_frame, placeholder_text="Parametre Ara").pack(side="left", padx=10)
+        ctk.CTkButton(search_frame, text="Ara", command=lambda: None).pack(side="left")
+
+        table = ctk.CTkScrollableFrame(self.param_tab, height=400)
+        table.pack(fill="both", expand=True, pady=10)
+
+        # Temsili parametreler
+        for i in range(10):
+            row = ctk.CTkFrame(table)
+            row.pack(fill="x", padx=10, pady=2)
+            ctk.CTkLabel(row, text=f"PARAM{i}", width=100).pack(side="left")
+            ctk.CTkEntry(row, placeholder_text="Değer").pack(side="left", fill="x", expand=True, padx=10)
+            ctk.CTkButton(row, text="Uygula", width=60).pack(side="right")
+
 class WaypointPlannerApp(ctk.CTkToplevel):
     waypointnum=0 
     waypoint_dict={}
@@ -321,6 +451,11 @@ class MissionPlannerApp(ctk.CTk):
         self.flight_mode = ctk.CTkLabel(self.telemetry_frame, text="Uçuş Modu: ")
         self.flight_mode.pack(pady=5)     
 
+        # Ayarlar Butonu
+        # ☰ Menü Butonu
+        self.menu_button = ctk.CTkButton(self.telemetry_frame, text="☰", width=40, command=self.opensettings)
+        self.menu_button.place(relx=0.99, rely=0.01, anchor="ne")
+
         self.battery_status = ctk.CTkLabel(self.telemetry_frame, text="Batarya Yüzdesi: %0", text_color="white")
         self.battery_status.pack(pady=2,padx=2)
         self.battery_voltage = ctk.CTkLabel(self.telemetry_frame, text="Batarya Voltajı: 0.00V", text_color="white")
@@ -376,7 +511,7 @@ class MissionPlannerApp(ctk.CTk):
         self.control_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
         
         self.arm_button = ctk.CTkButton(self.control_frame, text="Motorları Çalıştır", command=self.arm_drone)
-        self.arm_button.grid(row=0, column=0, padx=10, pady=10)
+        self.arm_button.grid(row=0, column=5, padx=10, pady=10)
         self.RTL_button = ctk.CTkButton(self.control_frame, text="Geri Dön", command=lambda: self.RTL(0))
         self.RTL_button.grid(row=0, column=0, padx=10, pady=10)
 
@@ -406,6 +541,10 @@ class MissionPlannerApp(ctk.CTk):
         self.drone_heading = 0
         self.update_display()
 
+
+    def opensettings(self):
+        SetupWindow(self)
+
     def kargohile(self,coords):
         self.kargo(otonom=0,altitude=0,coords=coords)
 
@@ -419,33 +558,34 @@ class MissionPlannerApp(ctk.CTk):
             self.location_check(coords)
         else:
             self.after(1000, lambda:self.checktakeof(alt=alt,coords=coords)) 
-
+   
+        
     def kargo(self,otonom,altitude,coords):
-        if otonom==1:
-            if self.vehicle.location.global_relative_frame.alt>=1:
-                lat = float(coords[0])
-                lon = float(coords[1])
-                self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
+            if otonom==1:
+                if self.vehicle.location.global_relative_frame.alt>=1:
+                    lat = float(coords[0])
+                    lon = float(coords[1])
+                    self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
+                else:
+
+                    print("Drone taking off...")
+                    self.vehicle.mode="GUIDED"
+                    self.vehicle.armed=True
+                    self.vehicle.simple_takeoff(float(altitude))
+                    self.checktakeof(alt=altitude,coords=coords)
             else:
-                
-                print("Drone taking off...")
-                self.vehicle.mode="GUIDED"
-                self.vehicle.armed=True
-                self.vehicle.simple_takeoff(float(altitude))
-                self.checktakeof(alt=altitude,coords=coords)
-        else:
-            if self.vehicle.location.global_relative_frame.alt>=1:
-                lat = float(coords[0])
-                lon = float(coords[1])
-                self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
-            else:
-                self.dialog = ctk.CTkInputDialog(text="K)alkış yapılacak yüksekliği girin:", title="Kalkış")
-                self.text = self.dialog.get_input()  # waits for input
-                print("Drone taking off...")
-                self.vehicle.mode="GUIDED"
-                self.vehicle.armed=True
-                self.vehicle.simple_takeoff(float(self.text))
-                self.checktakeof(alt=self.text,coords=coords)
+                if self.vehicle.location.global_relative_frame.alt>=1:
+                    lat = float(coords[0])
+                    lon = float(coords[1])
+                    self.checktakeof(float(self.vehicle.location.global_relative_frame.alt),coords=coords)
+                else:
+                    self.dialog = ctk.CTkInputDialog(text="Kalkış yapılacak yüksekliği girin:", title="Kalkış")
+                    self.text = self.dialog.get_input()  # waits for input
+                    print("Drone taking off...")
+                    self.vehicle.mode="GUIDED"
+                    self.vehicle.armed=True
+                    self.vehicle.simple_takeoff(float(self.text))
+                    self.checktakeof(alt=self.text,coords=coords)
                 
             
     def mapping(self, radius, otonom):
@@ -621,16 +761,19 @@ class MissionPlannerApp(ctk.CTk):
         if self.vehicle is not None:
             try:
                 global maplock
-                if self.number==1:
+                if self.number==1 and len(vehicle_manager.list_connected_vehicles())==2:
                     self.dron2_lat = self.vehicle2.location.global_frame.lat
                     self.dron2_lon = self.vehicle2.location.global_frame.lon 
                     self.drone_lat = self.vehicle.location.global_frame.lat 
                     self.drone_lon = self.vehicle.location.global_frame.lon 
-                else:
+                elif len(vehicle_manager.list_connected_vehicles())==2:
                     self.dron2_lat = self.vehicle.location.global_frame.lat
                     self.dron2_lon = self.vehicle.location.global_frame.lon 
                     self.drone_lat = self.vehicle2.location.global_frame.lat 
                     self.drone_lon = self.vehicle2.location.global_frame.lon 
+                else:
+                    self.drone_lat = self.vehicle.location.global_frame.lat 
+                    self.drone_lon = self.vehicle.location.global_frame.lon 
                 self.drone_marker.set_position(self.drone_lat, self.drone_lon)
                 if self.dual_ui_created==True:
                     self.drone2_marker.set_position(self.dron2_lat, self.dron2_lon)
@@ -838,14 +981,24 @@ class MissionPlannerApp(ctk.CTk):
                     self.RTL(1)
             
                 else:
-                    self.vehicle.close()
-                    vehicle_manager.disconnect_vehicle()
+                    if self.dual_ui_created:
+                        self.vehicle.close()
+                        self.vehicle2.close()
+                        
+                        vehicle_manager.disconnect_vehicles()
+                    else:
+                        self.vehicle.close()
+                        vehicle_manager.disconnect_vehicle("drone1")
                     self.hedefvar=0
+
                     self.connected=0
                     self.vehicle=None
-                    vehicle_manager.vehicle=None
+                    self.vehicle2=None
+                    vehicle_manager.vehicles={}
                     self.connect_button.configure(text="Drone'a Bağlan")
                     self.status_label.configure(text="Bağlantı Kesildi")
+                    self.opened=0
+
             elif self.vehicle is not None:
                 CTkMessagebox(title="Uyarı", message="Cihazınız Return To Launch modunda lütfen geri dönmesini bekleyin.", sound=1)
 
