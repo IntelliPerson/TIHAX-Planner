@@ -27,8 +27,10 @@ class VehicleManager:
                 print(f"[{ID}] Zaten bağlı.")
 
     def get_vehicle(self, ID: str) -> Vehicle:
-        with self._vehicles_lock:
-            return self.vehicles.get(ID, None)
+        vehicle = self.vehicles.get(ID)
+        if vehicle is None:
+            print(f"[Uyarı] '{ID}' ID'li bir araç bulunamadı.")
+        return vehicle
 
     def disconnect_vehicle(self, ID: str):
         with self._vehicles_lock:

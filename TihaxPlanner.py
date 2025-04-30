@@ -246,10 +246,14 @@ class MissionPlannerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
         self.vehicle = vehicle
+        self.vehicle2 = vehicle
         self.title("TIHAX Ground Station")
         self.geometry("1850x950")
         self.connected=0
         self.RTL_trig=0
+        self.number=0
+        self.dual_ui_created = False
+        self.dual_ui_lock = threading.Lock()
         # Sol harita paneli
         self.map_frame = ctk.CTkFrame(self, width=600, height=400)
         self.map_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
@@ -261,6 +265,7 @@ class MissionPlannerApp(ctk.CTk):
         self.map_widget.set_position(40.7769240, 30.3914130)  # Varsayılan konum (San Francisco)
         self.drone_marker = self.map_widget.set_marker(40.7769240, 30.3914130, text="Drone", text_color = "white", icon=self.drone_image)
         self.drone_marker.hide_image(False)
+        
         self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga")
 
         self.waypoint_window = None
@@ -614,17 +619,35 @@ class MissionPlannerApp(ctk.CTk):
     
     def update_drone_position(self):
         if self.vehicle is not None:
-            global maplock
-            self.drone_lat = self.vehicle.location.global_frame.lat 
-            self.drone_lon = self.vehicle.location.global_frame.lon 
-            self.drone_marker.set_position(self.drone_lat, self.drone_lon)
-            if maplock==True:
-                #print("açıkki")
-                self.map_widget.set_position(self.drone_lat, self.drone_lon)
-                self.map_widget.set_zoom(19)
-            if self.hedefvar==True:
-                position_list=[self.drone_marker.position, self.new_marker.position]
-                self.path_1.set_position_list(position_list)
+            try:
+                global maplock
+                if self.number==1:
+                    self.dron2_lat = self.vehicle2.location.global_frame.lat
+                    self.dron2_lon = self.vehicle2.location.global_frame.lon 
+                    self.drone_lat = self.vehicle.location.global_frame.lat 
+                    self.drone_lon = self.vehicle.location.global_frame.lon 
+                else:
+                    self.dron2_lat = self.vehicle.location.global_frame.lat
+                    self.dron2_lon = self.vehicle.location.global_frame.lon 
+                    self.drone_lat = self.vehicle2.location.global_frame.lat 
+                    self.drone_lon = self.vehicle2.location.global_frame.lon 
+                self.drone_marker.set_position(self.drone_lat, self.drone_lon)
+                if self.dual_ui_created==True:
+                    self.drone2_marker.set_position(self.dron2_lat, self.dron2_lon)
+                if maplock==True and len(vehicle_manager.list_connected_vehicles())==1:
+                    #print("açıkki")
+
+                    self.map_widget.set_position(self.drone_lat, self.drone_lon)
+                    self.map_widget.set_zoom(19)
+                if self.hedefvar==True:
+                    if self.number==1:
+                        position_list=[self.drone2_marker.position, self.new_marker.position]
+                        self.path_1.set_position_list(position_list)
+                    else:
+                        position_list=[self.drone_marker.position, self.new_marker.position]
+                        self.path_1.set_position_list(position_list)
+            except:
+                self.after(1000,self.update_drone_position)
             
 
 
@@ -859,15 +882,21 @@ class MissionPlannerApp(ctk.CTk):
             #self.vehicle = vehicle_manager.get_vehicle()
 
             #self.status_label.configure(text="Drone hazır!")
-            if len(vehicle_manager.list_connected_vehicles())==2:
-                self.tabview.add("Dual")
-                radio_var = tk.IntVar(value=0)
-                self.r1 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 1",
-                                             command=print("hello1"), variable= radio_var, value=1)
-                self.r1.pack(padx=10, pady=5)
-                self.r2 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 2",
-                                             command=print("hello2"), variable= radio_var, value=2)
-                self.r2.pack(padx=15, pady=5)
+            if len(vehicle_manager.list_connected_vehicles()) == 2:
+                with self.dual_ui_lock:
+                    if not self.dual_ui_created:
+                        self.tabview.add("Dual")
+                        radio_var = tk.IntVar(value=0)
+                        self.r1 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 1",
+                                             command=lambda: self.switchVehicle(ID="drone2"), variable=radio_var, value=1)
+                        self.r1.pack(padx=10, pady=5)
+                        self.r2 = ctk.CTkRadioButton(self.tabview.tab("Dual"), text="Drone 2",
+                                             command=lambda: self.switchVehicle(ID="drone1"), variable=radio_var, value=2)
+                        
+                        self.r2.pack(padx=15, pady=5)
+                        self.dual_ui_created = True
+                        self.drone2_marker = self.map_widget.set_marker(40.7768240, 30.3914130, text="Drone 2", text_color = "red", icon=self.drone_image)
+                        self.drone2_marker.hide_image(False)
 
         except Exception as e:
             self.status_label.configure(text=f"Bağlantı Hatası: {e}")
@@ -875,6 +904,15 @@ class MissionPlannerApp(ctk.CTk):
         #self.progress_bar.stop()
         #self.progress_bar.pack_forget()
 
+
+    def switchVehicle(self, ID):
+        self.vehicle = vehicle_manager.get_vehicle(ID=ID)
+        if ID=="drone2":
+            self.vehicle2 = vehicle_manager.get_vehicle(ID="drone1")
+            self.number=1
+        else:
+            self.vehicle2 = vehicle_manager.get_vehicle(ID="drone2")
+            self.number=2
 
     def update_horizon(self, tilt):
         self.horizon_bar.set(tilt)
@@ -1005,9 +1043,9 @@ class ConnectionWindow(ctk.CTkToplevel):
         super().__init__(parent)
         self.title("Bağlantı Seçimi")
         self.geometry("370x440")
-        self.resizable(False, False)
         self.lift()
         self.focus_force()
+        
         
 
         self.connection_mode = ctk.StringVar(value="single")
