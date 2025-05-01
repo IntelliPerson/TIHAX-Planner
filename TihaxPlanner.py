@@ -24,6 +24,34 @@ global waypointcoords
 maplock=True
 last_pwm = [0, 0, 0, 0]
 
+# FRAME_CLASS ve geçerli FRAME_TYPE seçenekleri
+frame_options = {
+    "Quad": {
+        "class": 1,
+        "types": {"X": 1, "Plus": 0, "H": 3, "V": 2}
+    },
+    "Hexa": {
+        "class": 2,
+        "types": {"X": 1, "Plus": 0}
+    },
+    "Octa": {
+        "class": 3,
+        "types": {"X": 1, "Plus": 0}
+    },
+    "OctaQuad": {
+        "class": 4,
+        "types": {"X": 1, "Plus": 0}
+    },
+    "Tri": {
+        "class": 5,
+        "types": {"Plus": 0}
+    },
+    "Y6": {
+        "class": 6,
+        "types": {"Y6A": 0, "Y6B": 1}
+    }
+}
+
 def pwm_listener(self, name, message):
     global last_pwm
     last_pwm[0] = message.servo1_raw
@@ -38,7 +66,17 @@ class SetupWindow(ctk.CTkToplevel):
         self.geometry("800x600")
         self.lift()
         self.focus_force()
-        
+        self.param_entries = {}  # parametre adı -> (entry_widget)
+        self.all_params = {}
+        self.filtered_params = []  # filtreleme için tüm parametreler
+        self.current_page = 0
+        self.items_per_page = 50
+
+        if vehicle_manager.get_connectiontype()=="dual":
+            self.vehicle = vehicle_manager.get_vehicle("drone2")
+            self.vehicle2 = vehicle_manager.get_vehicle("drone1")
+        else:
+            self.vehicle = vehicle_manager.get_vehicle("drone1")
 
         # Sekmeli yapı (tabview)
         self.tabview = ctk.CTkTabview(self)
@@ -106,10 +144,82 @@ class SetupWindow(ctk.CTkToplevel):
         ctk.CTkButton(self.calibration_content, text="RC Kalibrasyonu Başlat", command=lambda: None).pack(pady=10)
 
     def create_frame_tab(self):
-        ctk.CTkLabel(self.frame_tab, text="Drone Tipi Seçimi", font=("Arial", 16)).pack(pady=10)
-        self.frame_select = ctk.CTkOptionMenu(self.frame_tab, values=["Quad (X)", "Hexa", "Octo", "Y6", "Tri", "Plane"])
-        self.frame_select.pack(pady=10)
-        ctk.CTkButton(self.frame_tab, text="Frame Tipini Ayarla", command=lambda: None).pack(pady=5)
+        ctk.CTkLabel(self.frame_tab, text="Drone Tipi Seç (FRAME_CLASS)", font=("Arial", 15)).pack(pady=10)
+
+        # FRAME_CLASS Seçici
+        self.frame_class_menu = ctk.CTkOptionMenu(self.frame_tab,
+                                                  values=list(frame_options.keys()),
+                                                  command=self.update_frame_types)
+        self.frame_class_menu.pack(pady=5)
+
+        # FRAME_TYPE Başlığı
+        ctk.CTkLabel(self.frame_tab, text="Yerleşim Şekli Seç (FRAME_TYPE)", font=("Arial", 15)).pack(pady=10)
+
+        # FRAME_TYPE Seçici
+        self.frame_type_menu = ctk.CTkOptionMenu(self.frame_tab, values=[])
+        self.frame_type_menu.pack(pady=5)
+
+        # Ayarla Butonu
+        ctk.CTkButton(self.frame_tab, text="Frame Tipini Ayarla", command=self.ayarla_thread).pack(pady=20)
+
+        # Mevcut Ayarları Gösteren Etiket
+        self.status_label = ctk.CTkLabel(self.frame_tab, text="", font=("Arial", 13), text_color="gray")
+        self.status_label.pack(pady=10)
+
+        self.guncel_ayar_goster()
+
+
+        # Başlangıçta tipi güncelle
+        self.update_frame_types(self.frame_class_menu.get())
+
+    def update_frame_types(self, selected_class):
+        types = frame_options[selected_class]["types"]
+        self.frame_type_menu.configure(values=list(types.keys()))
+        self.frame_type_menu.set(list(types.keys())[0])
+
+    def ayarla_thread(self):
+        threading.Thread(target=self.ayarla).start()
+
+    def guncel_ayar_goster(self):
+        try:
+            current_class = int(self.vehicle.parameters["FRAME_CLASS"])
+            current_type = int(self.vehicle.parameters["FRAME_TYPE"])
+
+            class_name = next((k for k, v in frame_options.items() if v["class"] == current_class), "Bilinmiyor")
+            type_name = "Bilinmiyor"
+
+            if class_name != "Bilinmiyor":
+                for name, code in frame_options[class_name]["types"].items():
+                    if code == current_type:
+                        type_name = name
+                        break
+
+            self.status_label.configure(
+                text=f"Mevcut Ayar: {class_name} ({current_class}) - {type_name} ({current_type})"
+            )
+        except Exception as e:
+            self.status_label.configure(text="⚠️ Ayar okunamadı")
+            print(f"⚠️ Ayar okuma hatası: {e}")
+
+
+    def ayarla(self):
+        selected_class = self.frame_class_menu.get()
+        selected_type = self.frame_type_menu.get()
+
+        try:
+            frame_class = frame_options[selected_class]["class"]
+            frame_type = frame_options[selected_class]["types"][selected_type]
+
+            self.vehicle.parameters["FRAME_CLASS"] = frame_class
+            self.vehicle.parameters["FRAME_TYPE"] = frame_type
+
+            print(f"FRAME_CLASS -> {frame_class} ({selected_class})")
+            print(f"FRAME_TYPE  -> {frame_type} ({selected_type})")
+            self.guncel_ayar_goster()
+            print("✅ Ayarlar başarıyla yazıldı.")
+            print("⚠️ Uçuş kontrolcüsünü yeniden başlatmayı unutma.")
+        except Exception as e:
+            print(f"❌ Hata oluştu: {e}")
 
     def create_calibration_tab(self):
         ctk.CTkLabel(self.calibration_tab, text="Sensör Kalibrasyonları", font=("Arial", 16)).pack(pady=10)
@@ -144,29 +254,98 @@ class SetupWindow(ctk.CTkToplevel):
 
     def create_param_tab(self):
         ctk.CTkLabel(self.param_tab, text="Parametre Editörü", font=("Arial", 16)).pack(pady=10)
+        
+
         search_frame = ctk.CTkFrame(self.param_tab)
         search_frame.pack(pady=5)
 
-        ctk.CTkEntry(search_frame, placeholder_text="Parametre Ara").pack(side="left", padx=10)
-        ctk.CTkButton(search_frame, text="Ara", command=lambda: None).pack(side="left")
+        self.search_entry = ctk.CTkEntry(search_frame, placeholder_text="Parametre Ara")
+        self.search_entry.pack(side="left", padx=10)
 
-        table = ctk.CTkScrollableFrame(self.param_tab, height=400)
-        table.pack(fill="both", expand=True, pady=10)
+        ctk.CTkButton(search_frame, text="Ara", command=self.filter_params).pack(side="left")
 
-        # Temsili parametreler
-        for i in range(10):
-            row = ctk.CTkFrame(table)
+        self.table = ctk.CTkScrollableFrame(self.param_tab, height=460)
+        self.table.pack(fill="both", expand=True, pady=10)
+
+        threading.Thread(target=self.load_parameters, daemon=True).start()
+
+    def load_parameters(self):
+        self.all_params = dict(self.vehicle.parameters)
+        self.filtered_params = list(self.all_params.items())  # Tüm parametreleri göster
+        self.show_page()
+
+    def filter_params(self):
+        query = self.search_entry.get().strip().upper()
+        if not query:
+            self.filtered_params = list(self.all_params.items())
+        else:
+            self.filtered_params = [(k, v) for k, v in self.all_params.items() if query in k.upper()]
+
+        self.current_page = 0
+        self.show_page()
+
+    def display_parameters(self, params):
+        for widget in self.table.winfo_children():
+            widget.destroy()
+
+        self.param_entries.clear()
+
+        for param, value in params:
+            row = ctk.CTkFrame(self.table)
             row.pack(fill="x", padx=10, pady=2)
-            ctk.CTkLabel(row, text=f"PARAM{i}", width=100).pack(side="left")
-            ctk.CTkEntry(row, placeholder_text="Değer").pack(side="left", fill="x", expand=True, padx=10)
-            ctk.CTkButton(row, text="Uygula", width=60).pack(side="right")
+
+            ctk.CTkLabel(row, text=param, width=150).pack(side="left")
+            entry = ctk.CTkEntry(row)
+            entry.insert(0, str(value))
+            entry.pack(side="left", fill="x", expand=True, padx=10)
+
+            ctk.CTkButton(row, text="Uygula", width=60,
+                          command=lambda p=param, e=entry: self.set_param(p, e)).pack(side="right")
+
+            self.param_entries[param] = entry
+
+    def show_page(self):
+        start = self.current_page * self.items_per_page
+        end = start + self.items_per_page
+        page_items = self.filtered_params[start:end]
+
+        self.display_parameters(page_items)
+
+        # Sayfa kontrol butonları
+        control_frame = ctk.CTkFrame(self.table)
+        control_frame.pack(pady=5)
+        if self.current_page > 0:
+            ctk.CTkButton(control_frame, text="← Önceki", command=self.prev_page).pack(side="left", padx=5)
+        if end < len(self.filtered_params):
+            ctk.CTkButton(control_frame, text="Sonraki →", command=self.next_page).pack(side="left", padx=5)
+
+    def next_page(self):
+        self.current_page += 1
+        self.show_page()
+
+    def prev_page(self):
+        self.current_page -= 1
+        self.show_page()
+
+    def set_param(self, param_name, entry_widget):
+        try:
+            new_value = float(entry_widget.get())
+            self.vehicle.parameters[param_name] = new_value
+            print(f"{param_name} güncellendi: {new_value}")
+        except Exception as e:
+            print(f"{param_name} güncellenemedi: {e}")
 
 class WaypointPlannerApp(ctk.CTkToplevel):
     waypointnum=0 
     waypoint_dict={}
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.vehicle = vehicle_manager.get_vehicle()
+        #self.vehicle = vehicle_manager.get_vehicle()
+        if vehicle_manager.get_connectiontype()=="dual":
+            self.vehicle = vehicle_manager.get_vehicle("drone2")
+            self.vehicle2 = vehicle_manager.get_vehicle("drone1")
+        else:
+            self.vehicle = vehicle_manager.get_vehicle("drone1")
         self.title("Waypoint Planner")
         self.geometry("1360x730") 
         global waypointnum
@@ -522,7 +701,7 @@ class MissionPlannerApp(ctk.CTk):
         self.takeoff_button.grid(row=0, column=1, padx=10, pady=10)
 
         self.status_label = ctk.CTkLabel(self.control_frame, text="Bağlantı Yok")
-        self.status_label.grid(row=0,column=8,padx=620,pady=10)
+        self.status_label.grid(row=0,column=8,padx=600,pady=10)
 
         self.land_button = ctk.CTkButton(self.control_frame, text="İniş", command=self.land_drone)
         self.land_button.grid(row=0, column=2, padx=10, pady=10)
@@ -1050,6 +1229,9 @@ class MissionPlannerApp(ctk.CTk):
                         self.dual_ui_created = True
                         self.drone2_marker = self.map_widget.set_marker(40.7768240, 30.3914130, text="Drone 2", text_color = "red", icon=self.drone_image)
                         self.drone2_marker.hide_image(False)
+            flightmode = str(self.vehicle.mode).lower()
+            mod = flightmode.split(":")[1]
+            self.optionmenu.set(mod.capitalize())
 
         except Exception as e:
             self.status_label.configure(text=f"Bağlantı Hatası: {e}")
@@ -1179,7 +1361,7 @@ class MissionPlannerApp(ctk.CTk):
             self.roll_label.configure(text=f"Bağlı Uydu: {int(sats)}")
             self.yaw_label.configure(text=f"HDOP: {float(hdop/100)}")
             self.speed_label.configure(text = f"Hız: {total_speed:.2f} m/s")
-            self.flight_mode.configure(text=f"Uçuş Modu: {mod}")
+            self.flight_mode.configure(text=f"Uçuş Modu: {mod.capitalize()}")
             self.update_drone_position()
 
             self.battery_status.configure(text=f"Batarya Yüzdesi: %{batpercent}")
