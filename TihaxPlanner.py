@@ -91,10 +91,9 @@ class SetupWindow(ctk.CTkToplevel):
 
         self.create_frame_tab()
         self.create_calibration_tab()
-        self.create_flight_mode_tab()
+        self.create_mode_panel()
         self.create_pid_tab()
         self.create_param_tab()
-        self.create_calibration_tab()
 
     def create_calibration_tab(self):
         # Ana çerçeve (sol menü + sağ içerik)
@@ -111,6 +110,11 @@ class SetupWindow(ctk.CTkToplevel):
 
         # Menü butonları
 
+        ctk.CTkLabel(self.calibration_tab, text="Sensör Kalibrasyonları", font=("Arial", 16)).pack(pady=10)
+        ctk.CTkButton(self.calibration_tab, text="İvmeölçer Kalibrasyonu", command=self.show_accel_calibration).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="Jiroskop Kalibrasyonu", command=self.show_gyro_calibration).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="Pusula Kalibrasyonu", command=self.show_compass_calibration).pack(pady=5)
+        ctk.CTkButton(self.calibration_tab, text="RC Kalibrasyonu", command=lambda: None).pack(pady=5)
 
         # Varsayılan olarak ivmeölçer gösterilsin
         self.show_accel_calibration()
@@ -221,36 +225,134 @@ class SetupWindow(ctk.CTkToplevel):
         except Exception as e:
             print(f"❌ Hata oluştu: {e}")
 
-    def create_calibration_tab(self):
-        ctk.CTkLabel(self.calibration_tab, text="Sensör Kalibrasyonları", font=("Arial", 16)).pack(pady=10)
-        ctk.CTkButton(self.calibration_tab, text="İvmeölçer Kalibrasyonu", command=lambda: None).pack(pady=5)
-        ctk.CTkButton(self.calibration_tab, text="Jiroskop Kalibrasyonu", command=lambda: None).pack(pady=5)
-        ctk.CTkButton(self.calibration_tab, text="Pusula Kalibrasyonu", command=lambda: None).pack(pady=5)
-        ctk.CTkButton(self.calibration_tab, text="RC Kalibrasyonu", command=lambda: None).pack(pady=5)
 
-    def create_flight_mode_tab(self):
-        ctk.CTkLabel(self.flight_mode_tab, text="Uçuş Modları", font=("Arial", 16)).pack(pady=10)
-        modes = ["Stabilize", "AltHold", "Loiter", "Auto", "RTL", "Acro", "GUIDED"]
-        self.mode_menu = ctk.CTkOptionMenu(self.flight_mode_tab, values=modes)
-        self.mode_menu.pack(pady=10)
-        ctk.CTkButton(self.flight_mode_tab, text="Modu Ayarla", command=lambda: None).pack(pady=5)
+
+    def create_mode_panel(self):
+        ctk.CTkLabel(self.flight_mode_tab, text="Mevcut durum: " + self.vehicle.mode.name, font=("Arial", 14)).pack(pady=5)
+        ctk.CTkLabel(self.flight_mode_tab, text="PWM aralıklarına göre uçuş modları").pack(pady=3)
+
+        self.modes = ["STABILIZE", "ALT_HOLD", "LOITER", "AUTO", "RTL", "LAND", "GUIDED", "CIRCLE", "ACRO", "POSHOLD"]
+        self.mode_menus = []
+        self.simple_checks = []
+        self.super_simple_checks = []
+
+        for i in range(6):
+            row = ctk.CTkFrame(self.flight_mode_tab)
+            row.pack(padx=10, pady=3, fill="x")
+
+            ctk.CTkLabel(row, text=f"Uçuş Modu {i+1}").grid(row=0, column=0, padx=5)
+
+            menu = ctk.CTkOptionMenu(row, values=self.modes)
+            menu.grid(row=0, column=1, padx=5)
+            self.mode_menus.append(menu)
+
+            simple = ctk.CTkCheckBox(row, text="Simple Mode")
+            simple.grid(row=0, column=2, padx=5)
+            self.simple_checks.append(simple)
+
+            supersimple = ctk.CTkCheckBox(row, text="Super Simple Mode")
+            supersimple.grid(row=0, column=3, padx=5)
+            self.super_simple_checks.append(supersimple)
+
+            pwm_ranges = ["PWM 0-1230", "1231-1360", "1361-1490", "1491-1620", "1621-1749", "1750+"]
+            ctk.CTkLabel(row, text=pwm_ranges[i]).grid(row=0, column=4, padx=5)
+
+        ctk.CTkButton(self.flight_mode_tab, text="Ayarları Kaydet", command=self.save_modes).pack(pady=10)
+
+        self.load_modes()
+
+    def load_modes(self):
+        for i in range(6):
+            mode_param = f"FLTMODE{i+1}"
+            simple_param = f"SIMPLE{i+1}"
+
+            try:
+                mode_num = int(self.vehicle.parameters[mode_param])
+                mode_name = self.modes[mode_num - 1]  # ArduPilot modları 1 tabanlı
+                self.mode_menus[i].set(mode_name)
+            except Exception:
+                self.mode_menus[i].set("STABILIZE")
+
+            try:
+                val = int(self.vehicle.parameters[simple_param])
+                self.simple_checks[i].select() if val in [1, 3] else self.simple_checks[i].deselect()
+                self.super_simple_checks[i].select() if val in [2, 3] else self.super_simple_checks[i].deselect()
+            except:
+                self.simple_checks[i].deselect()
+                self.super_simple_checks[i].deselect()
+
+    def save_modes(self):
+        for i in range(6):
+            mode_name = self.mode_menus[i].get()
+            mode_index = self.modes.index(mode_name) + 1  # ArduPilot 1 tabanlı
+            simple_val = 0
+            if self.simple_checks[i].get():
+                simple_val += 1
+            if self.super_simple_checks[i].get():
+                simple_val += 2
+
+            try:
+                self.vehicle.parameters[f"FLTMODE{i+1}"] = mode_index
+                self.vehicle.parameters[f"SIMPLE{i+1}"] = simple_val
+                print(f"FLTMODE{i+1} → {mode_name}, SIMPLE{i+1} → {simple_val}")
+            except Exception as e:
+                print(f"Ayar hatası: {e}")
 
     def create_pid_tab(self):
         ctk.CTkLabel(self.pid_tab, text="PID Ayarları", font=("Arial", 16)).pack(pady=10)
 
-        # Basit PID alanları (Roll örneği)
+        self.pid_entries = {}
+
+        self.param_map = {
+            "Roll": {"P": "ATC_RAT_RLL_P", "I": "ATC_RAT_RLL_I", "D": "ATC_RAT_RLL_D"},
+            "Pitch": {"P": "ATC_RAT_PIT_P", "I": "ATC_RAT_PIT_I", "D": "ATC_RAT_PIT_D"},
+            "Yaw": {"P": "ATC_RAT_YAW_P", "I": "ATC_RAT_YAW_I", "D": "ATC_RAT_YAW_D"},
+        }
+
         for axis in ["Roll", "Pitch", "Yaw"]:
             frame = ctk.CTkFrame(self.pid_tab)
             frame.pack(pady=5, padx=20, fill="x")
 
-            ctk.CTkLabel(frame, text=f"{axis} P:").grid(row=0, column=0, padx=5, pady=5)
-            ctk.CTkEntry(frame, placeholder_text="0.1").grid(row=0, column=1, padx=5)
+            self.pid_entries[axis] = {}
 
-            ctk.CTkLabel(frame, text=f"{axis} I:").grid(row=0, column=2, padx=5)
-            ctk.CTkEntry(frame, placeholder_text="0.01").grid(row=0, column=3, padx=5)
+            for idx, term in enumerate(["P", "I", "D"]):
+                ctk.CTkLabel(frame, text=f"{axis} {term}:").grid(row=0, column=idx * 2, padx=5, pady=5)
+                entry = ctk.CTkEntry(frame, placeholder_text="0")
+                entry.grid(row=0, column=idx * 2 + 1, padx=5)
+                self.pid_entries[axis][term] = entry
 
-            ctk.CTkLabel(frame, text=f"{axis} D:").grid(row=0, column=4, padx=5)
-            ctk.CTkEntry(frame, placeholder_text="0.001").grid(row=0, column=5, padx=5)
+        # Kaydet butonu
+        save_button = ctk.CTkButton(self.pid_tab, text="PID'leri Uygula", command=self.send_pid_values)
+        save_button.pack(pady=10)
+
+        # PID değerlerini GUI'ye doldur
+        self.load_pid_values()
+
+    def load_pid_values(self):
+        for axis in self.pid_entries:
+            for term in self.pid_entries[axis]:
+                param_name = self.param_map[axis][term]
+                try:
+                    value = self.vehicle.parameters.get(param_name, 0.0)
+                    self.pid_entries[axis][term].insert(0, str(value))
+                except Exception as e:
+                    print(f"{param_name} okunurken hata: {e}")
+
+    def send_pid_values(self):
+        for axis in self.pid_entries:
+            for term in ["P", "I", "D"]:
+                value_str = self.pid_entries[axis][term].get()
+                if value_str.strip() == "":
+                    continue
+                try:
+                    value = float(value_str)
+                    param_name = self.param_map[axis][term]
+                    print(f"{param_name} ayarlanıyor: {value}")
+                    self.vehicle.parameters[param_name] = value
+                except ValueError:
+                    print(f"Geçersiz sayı: {value_str}")
+                except Exception as e:
+                    print(f"{param_name} ayarlanırken hata: {str(e)}")
 
     def create_param_tab(self):
         ctk.CTkLabel(self.param_tab, text="Parametre Editörü", font=("Arial", 16)).pack(pady=10)
