@@ -24,6 +24,45 @@ global waypointcoords
 maplock=True
 last_pwm = [0, 0, 0, 0]
 
+flight_modes = { 
+    "0":"STABILIZE",
+    "1":"ACRO",
+    "2":"ALT_HOLD",
+    "3":"AUTO",
+    "4":"GUIDED",
+    "5":"LOITER",
+    "6":"RTL",
+    "7":"CIRCLE",
+    "9":"LAND",
+    "11":"DRIFT",
+    "13":"SPORT",
+    "14":"FLIP",
+    "15":"AUTOTUNE",
+    "16":"POSHOLD",
+    "17":"BRAKE",
+    "18":"THROW",
+    }
+
+flight_mode_reversed = { 
+    "STABILIZE": "0",
+    "ACRO": "1",
+    "ALT_HOLD": "2",
+    "AUTO": "3",
+    "GUIDED": "4",
+    "LOITER": "5",
+    "RTL": "6",
+    "CIRCLE": "7",
+    "LAND": "9",
+    "DRIFT": "11",
+    "SPORT": "13",
+    "FLIP": "14",
+    "AUTOTUNE": "15",
+    "POSHOLD": "16",
+    "BRAKE": "17",
+    "THROW": "18",
+}
+
+
 # FRAME_CLASS ve geçerli FRAME_TYPE seçenekleri
 frame_options = {
     "Quad": {
@@ -231,7 +270,7 @@ class SetupWindow(ctk.CTkToplevel):
         ctk.CTkLabel(self.flight_mode_tab, text="Mevcut durum: " + self.vehicle.mode.name, font=("Arial", 14)).pack(pady=5)
         ctk.CTkLabel(self.flight_mode_tab, text="PWM aralıklarına göre uçuş modları").pack(pady=3)
 
-        self.modes = ["STABILIZE", "ALT_HOLD", "LOITER", "AUTO", "RTL", "LAND", "GUIDED", "CIRCLE", "ACRO", "POSHOLD"]
+        self.modes = ["STABILIZE", "ALT_HOLD", "LOITER", "AUTO", "RTL", "LAND", "GUIDED", "CIRCLE", "ACRO", "POSHOLD","BRAKE","AUTOTUNE","FLIP","SPORT","DRIFT"]
         self.mode_menus = []
         self.simple_checks = []
         self.super_simple_checks = []
@@ -245,10 +284,15 @@ class SetupWindow(ctk.CTkToplevel):
             menu = ctk.CTkOptionMenu(row, values=self.modes)
             menu.grid(row=0, column=1, padx=5)
             self.mode_menus.append(menu)
-
+            param_name = f"FLTMODE{i+1}"
+            mode_num = int(self.vehicle.parameters[param_name])
+            mode_name = flight_modes.get(str(mode_num), "Unknown")
+            print(mode_name)
+            menu.set(mode_name)
             simple = ctk.CTkCheckBox(row, text="Simple Mode")
             simple.grid(row=0, column=2, padx=5)
             self.simple_checks.append(simple)
+            
 
             supersimple = ctk.CTkCheckBox(row, text="Super Simple Mode")
             supersimple.grid(row=0, column=3, padx=5)
@@ -262,41 +306,55 @@ class SetupWindow(ctk.CTkToplevel):
         self.load_modes()
 
     def load_modes(self):
+        simple_param_val = int(self.vehicle.parameters["SIMPLE"])
+        super_simple_param_val = int(self.vehicle.parameters["SUPER_SIMPLE"])
+
+        print(f"SIMPLE: {simple_param_val:06b}, SUPERSIMPLE: {super_simple_param_val:06b}")
+
         for i in range(6):
-            mode_param = f"FLTMODE{i+1}"
-            simple_param = f"SIMPLE{i+1}"
+            simple_bit = (simple_param_val >> i) & 1
+            super_simple_bit = (super_simple_param_val >> i) & 1
 
-            try:
-                mode_num = int(self.vehicle.parameters[mode_param])
-                mode_name = self.modes[mode_num - 1]  # ArduPilot modları 1 tabanlı
-                self.mode_menus[i].set(mode_name)
-            except Exception:
-                self.mode_menus[i].set("STABILIZE")
+            print(f"Mode {i+1}: simple={simple_bit}, super_simple={super_simple_bit}")
 
-            try:
-                val = int(self.vehicle.parameters[simple_param])
-                self.simple_checks[i].select() if val in [1, 3] else self.simple_checks[i].deselect()
-                self.super_simple_checks[i].select() if val in [2, 3] else self.super_simple_checks[i].deselect()
-            except:
+            if simple_bit:
+                self.simple_checks[i].select()
+            else:
                 self.simple_checks[i].deselect()
+
+            if super_simple_bit:
+                self.super_simple_checks[i].select()
+            else:
                 self.super_simple_checks[i].deselect()
 
     def save_modes(self):
+        simple_mask = 0
+        super_simple_mask = 0
+
         for i in range(6):
             mode_name = self.mode_menus[i].get()
-            mode_index = self.modes.index(mode_name) + 1  # ArduPilot 1 tabanlı
-            simple_val = 0
+            print(mode_name)
+            
+            mode_index = flight_mode_reversed.get(str(mode_name), "Unknown")  # ArduPilot 1 tabanlı
+            print(mode_index)
+
             if self.simple_checks[i].get():
-                simple_val += 1
+                simple_mask |= (1 << i)
             if self.super_simple_checks[i].get():
-                simple_val += 2
+                super_simple_mask |= (1 << i)
 
             try:
-                self.vehicle.parameters[f"FLTMODE{i+1}"] = mode_index
-                self.vehicle.parameters[f"SIMPLE{i+1}"] = simple_val
-                print(f"FLTMODE{i+1} → {mode_name}, SIMPLE{i+1} → {simple_val}")
+                self.vehicle.parameters[f"FLTMODE{i+1}"] = float(mode_index)
+                print(f"FLTMODE{i+1} → {mode_name}")
             except Exception as e:
-                print(f"Ayar hatası: {e}")
+                print(f"FLTMODE{i+1} ayarlanırken hata: {e}")
+
+        try:
+            self.vehicle.parameters["SIMPLE"] = simple_mask
+            self.vehicle.parameters["SUPER_SIMPLE"] = super_simple_mask
+            print(f"SIMPLE → {bin(simple_mask)}, SUPERSIMPLE → {bin(super_simple_mask)}")
+        except Exception as e:
+            print(f"SIMPLE/SUPERSIMPLE ayarlanırken hata: {e}")
 
     def create_pid_tab(self):
         ctk.CTkLabel(self.pid_tab, text="PID Ayarları", font=("Arial", 16)).pack(pady=10)
