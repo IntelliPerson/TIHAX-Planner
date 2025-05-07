@@ -882,7 +882,8 @@ class MissionPlannerApp(ctk.CTk):
 
 
     def opensettings(self):
-        SetupWindow(self)
+        if self.vehicle is not None:
+            SetupWindow(self)
 
     def kargohile(self,coords):
         self.kargo(otonom=0,altitude=0,coords=coords)
