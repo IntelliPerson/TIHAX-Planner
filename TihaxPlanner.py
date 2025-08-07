@@ -7,14 +7,16 @@ from CTkListbox import *
 from geopy.distance import geodesic
 from tkinter import PhotoImage
 import csv
-from tkinter import Canvas
+from tkinter import Canvas, Label
 import datetime
 from device_manager import *
 import math
 from dronekit import Vehicle,LocationGlobalRelative,connect,LocationGlobal,VehicleMode,Command
 from CTkMessagebox import CTkMessagebox
+from math import radians, sin, cos
 import time
 from pymavlink import mavutil
+import queue
 
 vehicle_manager = VehicleManager()
 
@@ -517,7 +519,7 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         self.map_frame.grid(row=0, column=0, padx=10, pady=10, sticky="nsew")
         self.control_frame = ctk.CTkFrame(self, height=100)
         self.control_frame.grid(row=1, column=0, columnspan=2, padx=10, pady=10, sticky="ew")
-        self.map_widget = TkinterMapView(self.map_frame, width=1280, height=800)
+        self.map_widget = TkinterMapView(self.map_frame, width=1280, height=800, use_database_only=False,database_path="./offline_tiles.db")
         self.map_widget.pack(expand=True, fill="both")
         self.map_widget.set_position(40.7769240, 30.3914130)  # sakarya
         self.drone_image = PhotoImage(file="hexa.png")
@@ -528,14 +530,14 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         self.clear_button = ctk.CTkButton(self.control_frame, text="Waypointleri Sil", command=self.clear_wp)
         self.clear_button.grid(row=0,column=2,padx=10,pady=10)
 
-        self.mapping_button = ctk.CTkButton(self.control_frame, text="Haritalama Yap", command=lambda: app.mapping(otonom=0,radius=0))
+        self.mapping_button = ctk.CTkButton(self.control_frame, text="Haritalama Yap", command=lambda: app.mapping(otonom=1,radius=0))
         self.mapping_button.grid(row=0,column=2,padx=10,pady=10)
         self.telemetry_frame = ctk.CTkFrame(self, width=300)
         self.telemetry_frame.grid(row=0, column=1, padx=10, pady=10, sticky="ns")
         self.drone_marker = self.map_widget.set_marker(40.7769240, 30.3914130, text="Drone",text_color="white",icon=self.drone_image)
         self.listbox = CTkListbox(self.telemetry_frame, command=self.show_wp)
         self.listbox.pack(fill="both", expand=True, padx=10, pady=10)
-        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
+        self.map_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga")
 
         self.map_widget.add_left_click_map_command(self.waypointadder)
         self.map_widget.add_right_click_menu_command(label="Waypointleri temizle",command=self.clearwp)
@@ -610,7 +612,7 @@ class WaypointPlannerApp(ctk.CTkToplevel):
         self.listbox.delete(0, "end")
         self.waypoint_dict = {}
     def waypointadder(self,coords):
-        self.waypointcoords = self.waypointcoords
+        #self.waypointcoords = self.waypointcoords
         self.waypointcoords = coords
         print("Added Waypoint to",coords[0],coords[1])
         global waypointnum
@@ -714,6 +716,7 @@ class MissionPlannerApp(ctk.CTk):
 
     def __init__(self):
         super().__init__()
+        self.queue = queue.Queue()
         self.vehicle = vehicle
         self.vehicle2 = vehicle
         self.title("TIHAX Ground Station")
@@ -759,6 +762,8 @@ class MissionPlannerApp(ctk.CTk):
         else:
             self.RTL_Start=0
         # Create canvas for horizon display
+        self.canvas_width = 300
+        self.canvas_height = 150
         self.canvas = Canvas(self.telemetry_frame, width=300, height=150, bg="lightblue")
         self.canvas.pack(pady=10)
 
@@ -768,6 +773,12 @@ class MissionPlannerApp(ctk.CTk):
 
         # Horizon line
         self.horizon_line = self.canvas.create_line(0, 150, 600, 150, fill="red", width=5)
+
+        self.armed_status_text = self.canvas.create_text(self.canvas_width / 2, 20, text="DISARMED", fill="red", font=("Arial", 16, "bold"))
+
+        # Altta telemetry bilgisi için label
+        self.telemetry_label = Label(self.telemetry_frame, text="Telemetry info will appear here...", bg="black", fg="white", width=45)
+        self.telemetry_label.pack(pady=5)
 
         self.altitude_label = ctk.CTkLabel(self.telemetry_frame, text="Yükseklik: 0m")
         self.altitude_label.pack(pady=2,padx=2)
@@ -878,8 +889,40 @@ class MissionPlannerApp(ctk.CTk):
         self.drone_lat = 40.7769240
         self.drone_lon = 30.3914130
         self.drone_heading = 0
+        
         self.update_display()
 
+    def armed_callback(self, vehicle, attr_name, value):
+       # value: True (ARMED) ya da False (DISARMED)
+       if value:
+           self.set_armed_state(True)
+       else:
+           self.set_armed_state(False)
+    
+    def set_armed_state(self, armed: bool):
+        if armed:
+            self.canvas.itemconfig(self.armed_status_text, text="ARMED", fill="green")
+        else:
+            self.canvas.itemconfig(self.armed_status_text, text="DISARMED", fill="red")
+
+    def mavlink_message_listener(self, vehicle, name, message):
+        #print(f"Got MAVLink message: {message.get_type()}")
+        if message.get_type() == "STATUSTEXT":
+            severity = message.severity
+            text = message.text.decode('utf-8') if isinstance(message.text, bytes) else message.text
+            print(f"[STATUSTEXT] severity={severity} | text='{text}'")
+            if severity <= 4:
+                self.queue.put(f"WARNING/ERROR: {text}")
+
+    def update_telemetry_label(self, text):
+        self.telemetry_label.config(text=text)
+        self.after(4000, lambda: self.telemetry_label.config(text=""))
+
+    def process_queue(self):
+        while not self.queue.empty():
+            msg = self.queue.get()
+            self.update_telemetry_label(msg)
+        self.after(500, self.process_queue)
 
     def opensettings(self):
         if self.vehicle is not None:
@@ -930,12 +973,14 @@ class MissionPlannerApp(ctk.CTk):
             
     def mapping(self, radius, otonom):
         if otonom==1:
-
+            self.dialog = ctk.CTkInputDialog(text="Haritalamak istediğiniz yer miktarını giriniz:", title="Haritalama")
+            self.text = self.dialog.get_input()  # waits for input
             center_lat, center_lon = get_current_location(self.vehicle)
             clear_all_waypoints(self.vehicle)
 
-            radius_cm = float(radius) * 100
-            waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
+            radius_cm = float(self.text)
+            waypoints = self.generate_sector_sweep_waypoints(radius=radius_cm, quality=10,sweep_angle_deg=360)
+            print(waypoints)
         else:    
             self.dialog = ctk.CTkInputDialog(text="Haritalamak istediğiniz yer miktarını giriniz:", title="Haritalama")
             self.text = self.dialog.get_input()  # waits for input
@@ -944,8 +989,10 @@ class MissionPlannerApp(ctk.CTk):
 
             radius_cm = float(self.text) * 100
             waypoints = calculate_waypoints(center_lat, center_lon, radius_cm)
-
-        upload_mission(self.vehicle, waypoints)
+        center = self.vehicle.location.global_relative_frame
+        center_lat = center.lat
+        center_lon = center.lon
+        upload_mission(self.vehicle, waypoints,scan=1,roi_lat=center_lat,roi_lon=center_lon)
 
     def location_check(self,coords):
             self.drone_lat = self.vehicle.location.global_frame.lat 
@@ -955,12 +1002,11 @@ class MissionPlannerApp(ctk.CTk):
             distance = self.get_distance_metres(current_location,self.target_location)
             print(distance)
             if distance<3:
-                print("oe")
                 self.drone_lat = self.vehicle.location.global_frame.lat 
                 self.drone_lon = self.vehicle.location.global_frame.lon 
-                self.target_location = LocationGlobalRelative(self.drone_lat, self.drone_lon, 2)
-                self.vehicle.simple_goto(self.target_location)
-                print("babaannnennn")
+                self.target_location = LocationGlobalRelative(self.drone_lat, self.drone_lon, 5)
+                self.vehicle.simple_goto(self.target_location,groundspeed=0.5)
+                self.altitude_control(5)
                 self.after(15000, lambda: self.RTL(0))
                 
             else:
@@ -1062,7 +1108,7 @@ class MissionPlannerApp(ctk.CTk):
             current_altitude = current_location.alt
             if current_altitude>2:
                 target_location = LocationGlobalRelative(current_location.lat, current_location.lon, 10)
-                self.vehicle.simple_goto(target_location)
+                self.vehicle.simple_goto(target_location,groundspeed=1.0)
                 self.checktakeoff()
             else:
                 self.takeoff_drone(otonom=1,altitude=10)
@@ -1083,11 +1129,13 @@ class MissionPlannerApp(ctk.CTk):
                 self.vehicle.mode="GUIDED"
                 self.vehicle.armed=True
                 self.vehicle.simple_takeoff(float(self.text))
+                self.altitude_control(float(self.text))
             else:             
                 print("Drone taking off...")
                 self.vehicle.mode="GUIDED"
                 self.vehicle.armed=True
                 self.vehicle.simple_takeoff(float(altitude))
+                self.altitude_control(altitude=altitude)
 
     def land_drone(self):
         print("Drone landing...")
@@ -1095,7 +1143,7 @@ class MissionPlannerApp(ctk.CTk):
         self.changeMode("Land")
         self.update_drone_position()
         #self.update_compass_heading(0)
-        self.update_horizon(0.5)
+        self.altitude_control(0)
     
     def update_drone_position(self):
         if self.vehicle is not None:
@@ -1200,6 +1248,50 @@ class MissionPlannerApp(ctk.CTk):
         
         self.remove_point()
 
+    def calculate_heading_to_point(self,from_lat, from_lon, to_lat, to_lon):
+        dLon = math.radians(to_lon - from_lon)
+        lat1 = math.radians(from_lat)
+        lat2 = math.radians(to_lat)
+
+        x = math.sin(dLon) * math.cos(lat2)
+        y = math.cos(lat1) * math.sin(lat2) - (math.sin(lat1) * math.cos(lat2) * math.cos(dLon))
+
+        initial_bearing = math.atan2(x, y)
+        bearing_degrees = (math.degrees(initial_bearing) + 360) % 360
+        return bearing_degrees
+
+    def generate_sector_sweep_waypoints(self, radius, quality, sweep_angle_deg=60):
+        current_location = self.vehicle.location.global_relative_frame
+        center_lat = current_location.lat
+        center_lon = current_location.lon
+        heading_deg = self.vehicle.heading
+
+        angle_start = heading_deg - sweep_angle_deg / 2
+        angle_step = sweep_angle_deg / max(quality - 1, 1)
+        waypoints = []
+
+        for i in range(quality):
+            angle = radians(angle_start + i * angle_step)
+            north = radius * cos(angle)
+            east = radius * sin(angle)
+
+            dlat = north / 111111
+            dlon = east / (111111 * cos(radians(center_lat)))
+
+            new_lat = center_lat + dlat
+            new_lon = center_lon + dlon
+
+            # Merkezden bu noktaya bakış açısını hesapla (dışarıya bakmak için 180° çevir)
+            yaw = (self.calculate_heading_to_point(center_lat, center_lon, new_lat, new_lon) + 180) % 360
+
+            waypoints.append((new_lat, new_lon))
+
+        return waypoints
+
+
+
+
+
     def remove_point(self):
         if self.hedefvar==1 and self.RTL_trig==0:
             self.path_1.delete()
@@ -1238,7 +1330,7 @@ class MissionPlannerApp(ctk.CTk):
                     self.vehicle.mode="GUIDED"    
                 if self.hedefvar==1:
                     self.remove_point()
-                self.vehicle.simple_goto(target_location)
+                self.vehicle.simple_goto(target_location,groundspeed=1.0)
                 self.switchRTL(disconnect)
             else:
                 if self.hedefvar==1:
@@ -1255,7 +1347,13 @@ class MissionPlannerApp(ctk.CTk):
             self.after(1000, self.checkaltitude) 
 
 
-
+    def altitude_control(self,altitude):
+        current_location = self.vehicle.location.global_relative_frame
+        current_altitude = current_location.alt
+        if current_altitude == altitude:
+            pass
+        else:
+            self.after(100,lambda:self.altitude_control(altitude=altitude))
 
     def checkalt(self,disconnect):
         current_location = self.vehicle.location.global_relative_frame
@@ -1391,6 +1489,9 @@ class MissionPlannerApp(ctk.CTk):
                         self.drone2_marker = self.map_widget.set_marker(40.7768240, 30.3914130, text="Drone 2", text_color = "red", icon=self.drone_image)
                         self.drone2_marker.hide_image(False)
             flightmode = str(self.vehicle.mode).lower()
+            self.vehicle.add_attribute_listener('armed', self.armed_callback)
+            self.vehicle.add_message_listener('*', self.mavlink_message_listener)
+            self.after(500, self.process_queue)
             mod = flightmode.split(":")[1]
             self.optionmenu.set(mod.capitalize())
 
@@ -1665,6 +1766,25 @@ import time
 
 flaskapp = Flask(__name__)
 
+@flaskapp.route("/status", methods=["GET"])
+def status():
+    vehicle = app.vehicle
+    if app.hedefvar==1:
+        drone_lat = app.vehicle.location.global_frame.lat 
+        drone_lon = app.vehicle.location.global_frame.lon 
+        current_location = app.vehicle.location.global_relative_frame
+        uzaklik = app.get_distance_metres(current_location,app.target_location)
+    if not vehicle:
+        return jsonify({"status": "Cihaz Bağlı Değil"})
+    return jsonify({
+        "Yükseklik": vehicle.location.global_relative_frame.alt,
+        "Şarj seviyesi": vehicle.battery.level,
+        "uçuş Modu": str(vehicle.mode),
+        "Motor durumu": vehicle.armed,
+        "hedef var": app.hedefvar,
+        "Hedefe Uzaklık" : uzaklik
+    })
+
 @flaskapp.route('/execute', methods=['POST'])
 def execute_command():
     data = request.get_json()
@@ -1754,7 +1874,7 @@ def calculate_waypoints(center_lat, center_lon, radius_cm, spacing_m=10):
         line_lat = north_shift['lat2']
         line_lon = north_shift['lon2']
 
-        # Sağdan sola mı, soldan sağa mı?
+       
         reverse = i % 2 == 1
 
         line_wps = []
@@ -1766,12 +1886,12 @@ def calculate_waypoints(center_lat, center_lon, radius_cm, spacing_m=10):
             point = geod.Direct(line_lat, line_lon, bearing, abs(offset_x))
             lat, lon = point['lat2'], point['lon2']
 
-            # Dairenin dışına taşmasın
+            
             dist = geod.Inverse(center_lat, center_lon, lat, lon)['s12']
             if dist <= radius_m:
                 line_wps.append((lat, lon))
 
-        # Dönüş yönüne göre sırala
+        
         if reverse:
             line_wps.reverse()
 
@@ -1780,17 +1900,56 @@ def calculate_waypoints(center_lat, center_lon, radius_cm, spacing_m=10):
     return waypoints
 
 
-def upload_mission(vehicle, waypoints):
+def upload_mission(vehicle, waypoints, scan, roi_lat=None, roi_lon=None):
     cmds = vehicle.commands
     cmds.clear()
     print("Waypoint'ler yükleniyor...")
-    for (lat, lon) in waypoints:
-        cmd = Command(0, 0, 0, mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
-                      mavutil.mavlink.MAV_CMD_NAV_WAYPOINT, 0, 0, 0, 0, 0, 0,
-                      lat, lon, 10)
-        cmds.add(cmd)
-    cmds.upload()
-    print("Waypoint'ler başarıyla yüklendi!")
+
+    if scan == 1:
+        if roi_lat is None or roi_lon is None:
+            raise ValueError("ROI (merkez) koordinatları belirtilmeli")
+
+        for (lat, lon) in waypoints:
+            # 1️⃣ Dışarı bakmak için merkez noktasına SET_ROI komutu ekle
+            roi_cmd = Command(
+                0, 0, 0,
+                mavutil.mavlink.MAV_FRAME_GLOBAL,
+                mavutil.mavlink.MAV_CMD_DO_SET_ROI,
+                0, 0,
+                0, 0, 0, 0,
+                roi_lat, roi_lon, 10  # ROI koordinatı (drone burnu buraya dönük kalacak)
+            )
+            cmds.add(roi_cmd)
+
+            # 2️⃣ Normal waypoint komutu
+            wp_cmd = Command(
+                0, 0, 0,
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                0, 0,
+                0, 0, 0, 0,
+                lat, lon, 10
+            )
+            cmds.add(wp_cmd)
+
+        cmds.upload()
+        print("Waypoint'ler başarıyla yüklendi!")
+
+    else:
+        for (lat, lon) in waypoints:
+            cmd = Command(
+                0, 0, 0,
+                mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                0, 0,
+                0, 0, 0, 0,
+                lat, lon, 10
+            )
+            cmds.add(cmd)
+
+        cmds.upload()
+        print("Waypoint'ler başarıyla yüklendi!")
+
 
 if __name__ == '__main__':
     connection_string = "tcp:127.0.0.1:5762"  # Replace with actual connection
